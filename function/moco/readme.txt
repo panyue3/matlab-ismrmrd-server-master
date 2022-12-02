@@ -1,0 +1,1 @@
+this is the motion correction package by Marie-Pierre Jolly. We (Yingmin LIU) got it from Ning Jin, Ph.D.
