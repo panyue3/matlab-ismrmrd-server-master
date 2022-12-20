@@ -8,7 +8,7 @@ ARG  MATLAB_INSTALLER_PATH
 LABEL org.opencontainers.image.description="MATLAB MRD Image Reconstruction and Analysis Server"
 LABEL org.opencontainers.image.url="https://github.com/kspaceKelvin/matlab-ismrmrd-server"
 LABEL org.opencontainers.image.authors="Kelvin Chow (kelvin.chow@siemens-healthineers.com)"
-EXPOSE 9002
+EXPOSE 9095
 
 # --------------------------------------------------------------------------------------------------
 #      Install Prerequisites
@@ -77,11 +77,11 @@ COPY license.lic /usr/local/MATLAB/R2022a/licenses
 
 # Network MATLAB licenses are usually tied to the username/host.  The username can be set by
 # uncommenting the following line with the appropriate username:
-RUN useradd -ms /bin/bash kelvin
-RUN usermod -aG docker kelvin
-RUN echo 'export PATH="/usr/local/MATLAB/R2022a/bin/:$PATH"' > /home/kelvin/.bashrc
-RUN chown -R kelvin:kelvin /home/kelvin
-USER kelvin
+# RUN useradd -ms /bin/bash kelvin
+# RUN usermod -aG docker kelvin
+# RUN echo 'export PATH="/usr/local/MATLAB/R2022a/bin/:$PATH"' > /home/kelvin/.bashrc
+# RUN chown -R kelvin:kelvin /home/kelvin
+# USER kelvin
 
 #
 # The hostname must be set during "docker run":
@@ -98,15 +98,15 @@ CMD [ "/usr/local/MATLAB/R2022a/bin/matlab"]
 
 # Option 2: Alternatively, download the MCR from https://ssd.mathworks.com/supportfiles/downloads/R2022a/Release/1/deployment_files/installer/complete/glnxa64/MATLAB_Runtime_R2022a_Update_1_glnxa64.zip
 # Place this file in the root of the build context and use the following instead of the above "compiler.runtime.download" call:
-# RUN mkdir /root/MCRInstaller9.12
-# COPY MATLAB_Runtime_R2022a_Update_1_glnxa64.zip /root/MCRInstaller9.12/
-# RUN /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setInstallerLocation('/root/MCRInstaller9.12/MATLAB_Runtime_R2022a_Update_1_glnxa64.zip'); quit"
+RUN mkdir /root/MCRInstaller9.12
+COPY MATLAB_Runtime_R2022a_Update_5_glnxa64.zip /root/MCRInstaller9.12/
+RUN /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setInstallerLocation('/root/MCRInstaller9.12/MATLAB_Runtime_R2022a_Update_1_glnxa64.zip'); quit"
 
 # Note: If a username-based MATLAB license file is used, then replace /root/ in the above commands
 # (3 instances) with /home/username/, where username is the licensed username.
-RUN mkdir -p /home/kelvin/MCRInstaller9.12
-COPY MATLAB_Runtime_R2022a_Update_1_glnxa64.zip /home/kelvin/MCRInstaller9.12/
-RUN su kelvin && /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setInstallerLocation('/home/kelvin/MCRInstaller9.12/MATLAB_Runtime_R2022a_Update_1_glnxa64.zip'); quit"
+# RUN mkdir -p /home/kelvin/MCRInstaller9.12
+# COPY MATLAB_Runtime_R2022a_Update_5_glnxa64.zip /home/kelvin/MCRInstaller9.12/
+# RUN su kelvin && /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setInstallerLocation('/home/kelvin/MCRInstaller9.12/MATLAB_Runtime_R2022a_Update_1_glnxa64.zip'); quit"
 
 # # --------------------------------------------------------------------------------------------------
 # #      Copy MATLAB MRD Server code

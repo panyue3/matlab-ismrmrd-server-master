@@ -24,6 +24,7 @@ classdef prompt < handle
             % Continuously parse incoming data parsed from MRD messages
             acqGroup = cell(1,0); % ismrmrd.Acquisition;
             imgGroup = cell(1,0); % ismrmrd.Image;
+            wavGroup = cell(1,0); % ismrmrd.Waveform;
             try
                 while true
                     item = next(connection);
@@ -34,31 +35,25 @@ classdef prompt < handle
                     if isa(item, 'ismrmrd.Acquisition')
                         % Accumulate all imaging readouts in a group
                         if (~item.head.flagIsSet(item.head.FLAGS.ACQ_IS_NOISE_MEASUREMENT)    && ...
-                                ~item.head.flagIsSet(item.head.FLAGS.ACQ_IS_PHASECORR_DATA)       && ...
-                                ~item.head.flagIsSet(item.head.FLAGS.ACQ_IS_PARALLEL_CALIBRATION)       )
-                            acqGroup{end+1} = item;
+                            ~item.head.flagIsSet(item.head.FLAGS.ACQ_IS_PHASECORR_DATA)       && ...
+                            ~item.head.flagIsSet(item.head.FLAGS.ACQ_IS_PARALLEL_CALIBRATION)       )
+                                acqGroup{end+1} = item;
                         end
 
                         % When this criteria is met, run process_raw() on the accumulated
                         % data, which returns images that are sent back to the client.
-                        if item.head.flagIsSet(item.head.FLAGS.ACQ_LAST_IN_SLICE)
-                            logging.info("Processing a group of k-space data")
-                            image = obj.process_raw(acqGroup, config, metadata, logging);
-                            logging.debug("Sending image to client")
-                            connection.send_image(image);
-                            acqGroup = {};
+                        if item.head.flagIsSet(item.head.FLAGS.ACQ_LAST_IN_MEASUREMENT)
+                            logging.info("Do nothing to k-space data")
+                            acqGroup = cell(1,0);
                         end
 
-                        % ----------------------------------------------------------
-                        % Image data messages
-                        % ----------------------------------------------------------
+                    % ----------------------------------------------------------
+                    % Image data messages
+                    % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
                         % Only process magnitude images -- send phase images back without modification
                         if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
                             imgGroup{end+1} = item;
-                        else
-                            connection.send_image(item);
-                            continue
                         end
 
                         % When this criteria is met, run process_group() on the accumulated
@@ -71,6 +66,12 @@ classdef prompt < handle
                             connection.send_image(image);
                             imgGroup = cell(1,0);
                         end
+
+                    % ----------------------------------------------------------
+                    % Waveform data messages
+                    % ----------------------------------------------------------
+                    elseif isa(item, 'ismrmrd.Waveform')
+                        wavGroup{end+1} = item;
 
                     elseif isempty(item)
                         break;
@@ -88,29 +89,15 @@ classdef prompt < handle
             % This is also a fallback for handling image data, as the last
             % image in a series is typically not separately flagged.
             if ~isempty(acqGroup)
-                logging.info("Processing a group of k-space data (untriggered)")
-                image = obj.process_raw(acqGroup, config, metadata, logging);
-                logging.debug("Sending image to client")
-                connection.send_image(image);
+                logging.info("Do nothing to k-space data (untriggered)")
                 acqGroup = cell(1,0);
             end
 
             if ~isempty(imgGroup)
                 logging.info("Processing a group of images (untriggered)")
-                imshift = obj.process_images(imgGroup, config, metadata, logging);
-
-                % Save displacement data and figure to output folder
-                tmp = split(metadata.measurementInformation.frameOfReferenceUID,'.');
-                filename = sprintf("%s_%s.mat",metadata.measurementInformation.protocolName, tmp{11});
-                logging.debug("Saving displacement data.");
-                save(fullfile(pwd,'output',filename),'imshift');
-                filename = sprintf("%s_%s.png",metadata.measurementInformation.protocolName, tmp{11});
-                fig = figure;
-                plot(imshift); ylabel('Disp data'); legend('dX','dY','dZ'); title('Image Disp');
-                saveas(fig, fullfile(pwd,'output',filename))
-                close(fig)
-
-                %                 connection.send_image(image);
+                image = obj.process_images(imgGroup, config, metadata, logging);
+                logging.debug("Sending image to client");
+                connection.send_image(image);
                 imgGroup = cell(1,0);
             end
 
@@ -176,7 +163,7 @@ classdef prompt < handle
         end     % end of process_raw()
 
         %% PROCESS_IMAGES
-        function imshift = process_images(obj, group, config, metadata, logging)
+        function image = process_images(obj, group, config, metadata, logging)
             % Extract image data
             nOri = max(cell2mat(cellfun(@(x) x.head.slice, group, 'UniformOutput', false))) + 1;
             nRep = max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1;
@@ -338,6 +325,7 @@ classdef prompt < handle
                 % === Save MOCOed images ===
 
                 % +++ Plot NMSE  +++
+                setPlotDefault
                 nmse(iOri,1) = nan;
                 fig = figure(1);
                 subplot(double(nOri),1,double(iOri))
@@ -367,6 +355,37 @@ classdef prompt < handle
             filename = sprintf("%s_%s_NMSE.png",metadata.measurementInformation.protocolName, tmp{11});
             saveas(fig, fullfile(pwd,'output',filename))
             close(fig)
+
+            % Save displacement data and figure to output folder
+            tmp = split(metadata.measurementInformation.frameOfReferenceUID,'.');
+            filename = sprintf("%s_%s.mat",metadata.measurementInformation.protocolName, tmp{11});
+            save(fullfile(pwd,'output',filename),'imshift');
+
+            filename = sprintf("%s_%s.png",metadata.measurementInformation.protocolName, tmp{11});
+            fig = figure;
+            hold on
+            plot(imshift(:,1),'k'); plot(imshift(:,2),'k--'); plot(imshift(:,3),'k:');
+            xlim([0 size(imshift,1)]);
+            ylabel('Displacement (mm)'); title('Image Disp');
+            legend('dX','dY','dZ','Location','southoutside','NumColumns',3);
+            hold off
+            saveas(fig, fullfile(pwd,'output',filename))
+            close(fig)
+
+            % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
+            data = int16(255 - rgb2gray(imread(fullfile(pwd,'output',filename))))';
+            image = ismrmrd.Image(data);
+
+            % Copy original image header, but keep the new data_type
+            data_type = image.head.data_type;
+            image.head = group{1}.head;
+            image.head.data_type = data_type;
+            image.head.matrix_size = size(data, [1 2 3]);
+
+            % Add to ImageProcessingHistory
+            meta = ismrmrd.Meta.deserialize(group{1}.attribute_string);
+            meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'ImageShift');
+            image = image.set_attribute_string(ismrmrd.Meta.serialize(meta));
 
         end     % end of process_images()
     end
