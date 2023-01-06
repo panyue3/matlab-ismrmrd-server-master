@@ -134,15 +134,18 @@ RUN apt-get remove git -y \
 # #              -v /code:/code                                \ # Share a folder where code can accessed
 # #              -p 9002:9002                                  \ # Forward the MRD network port if testing the server
 # #               fire-matlab-compiler
+# #   docker run --rm -it --mac-address 02:42:ac:11:00:06 -p 9095:9095 -v /var/run/docker.sock:/var/run/docker.sock pany3/fire-matlab-server:debug
 # #
 # # In the MATLAB Command Prompt, change to the folder containing the server code:
 # #   cd /code/matlab-ismrmrd-server
 # #
-# # Build the standalone application and a Docker image:
+# # Build the standalone application and a Docker image:    --- buildDocker.m ---
+# #   addpath('mex');
+# #   addpath(genpath('function'))
 # #   res = compiler.build.standaloneApplication('fire_matlab_ismrmrd_server.m', 'TreatInputsAsNumeric', 'on')
 # #   opts = compiler.package.DockerOptions(res, 'ImageName', 'fire-matlab-server')
 # #   compiler.package.docker(res, 'Options', opts)
 # #
 # # Quit MATLAB and exit the Docker container when complete.  The MCR Docker image should be visible
 # # on the host with the name 'fire-matlab-server'.  It can be started with:
-# #   docker run --rm -p 9002:9002 fire-matlab-server
+# #   docker run --rm -p 9095:9095 -v /C//Users/pan21/Desktop/DockerOut:/output --name aa fire-matlab-server 9095
