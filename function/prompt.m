@@ -310,27 +310,31 @@ classdef prompt < handle
                 % === MOCO all images use end respiratory frame as reference ===
 
                 % +++ Save MOCOed images +++
-                clear im
-                tmp = split(metadata.measurementInformation.frameOfReferenceUID,'.');
-                filename = sprintf("IMG_MOCO_Ori%i_%s_%s.gif",iOri,metadata.measurementInformation.protocolName, tmp{11});
-                for iRep = 1:nRep
-                    im = uint8(Icomb(:,:,iRep)/max(Iref(:))*255);
+                if ispc
+                    clear im
+                    tmp = split(metadata.measurementInformation.frameOfReferenceUID,'.');
+                    filename = sprintf("IMG_MOCO_Ori%i_%s_%s.gif",iOri,metadata.measurementInformation.protocolName, tmp{11});
+                    for iRep = 1:nRep
+                        im = uint8(Icomb(:,:,iRep)/max(Iref(:))*255);
 
-                    if iRep == 1
-                        imwrite(im,fullfile(pwd,'output',filename), 'gif', 'Loopcount', inf);
-                    else
-                        imwrite(im,fullfile(pwd,'output',filename),'gif', 'DelayTime', 0.25, 'WriteMode','append');
+                        if iRep == 1
+                            imwrite(im,fullfile(pwd,'output',filename), 'gif', 'Loopcount', inf);
+                        else
+                            imwrite(im,fullfile(pwd,'output',filename),'gif', 'DelayTime', 0.25, 'WriteMode','append');
+                        end
                     end
                 end
                 % === Save MOCOed images ===
 
                 % +++ Plot NMSE  +++
-                setPlotDefault
-                nmse(iOri,1) = nan;
-                fig = figure(1);
-                subplot(double(nOri),1,double(iOri))
-                plot(nmse(iOri,:))
-                title(sprintf('Ref frame %i, Mean NMSE x 1000: %0.2f',idx,mean(nmse(iOri,:),'omitnan')*1000))
+                if ispc
+                    setPlotDefault
+                    nmse(iOri,1) = nan;
+                    fig = figure(1);
+                    subplot(double(nOri),1,double(iOri))
+                    plot(nmse(iOri,:))
+                    title(sprintf('Ref frame %i, Mean NMSE x 1000: %0.2f',idx,mean(nmse(iOri,:),'omitnan')*1000))
+                end
                 % === Plot NMSE ===
 
                 % +++ Save imshift +++
@@ -352,25 +356,33 @@ classdef prompt < handle
             end    % end of count Ori
 
             % Save NMSE plot
-            filename = sprintf("%s_%s_NMSE.png",metadata.measurementInformation.protocolName, tmp{11});
-            saveas(fig, fullfile(pwd,'output',filename))
-            close(fig)
+            if ispc
+                filename = sprintf("%s_%s_NMSE.png",metadata.measurementInformation.protocolName, tmp{11});
+                saveas(fig, fullfile(pwd,'output',filename))
+                close(fig)
+            end
 
             % Save displacement data and figure to output folder
             tmp = split(metadata.measurementInformation.frameOfReferenceUID,'.');
             filename = sprintf("%s_%s.mat",metadata.measurementInformation.protocolName, tmp{11});
-            save(fullfile(pwd,'output',filename),'imshift');
+            if ispc
+                save(fullfile(pwd,'output',filename),'imshift');
+            elseif isunix
+                save(fullfile(pwd,'/tmp/share',filename),'imshift')
+            end
 
-            filename = sprintf("%s_%s.png",metadata.measurementInformation.protocolName, tmp{11});
-            fig = figure;
-            hold on
-            plot(imshift(:,1),'k'); plot(imshift(:,2),'k--'); plot(imshift(:,3),'k:');
-            xlim([0 size(imshift,1)]);
-            ylabel('Displacement (mm)'); title('Image Disp');
-            legend('dX','dY','dZ','Location','southoutside','NumColumns',3);
-            hold off
-            saveas(fig, fullfile(pwd,'output',filename))
-            close(fig)
+            if ispc
+                filename = sprintf("%s_%s.png",metadata.measurementInformation.protocolName, tmp{11});
+                fig = figure;
+                hold on
+                plot(imshift(:,1),'k'); plot(imshift(:,2),'k--'); plot(imshift(:,3),'k:');
+                xlim([0 size(imshift,1)]);
+                ylabel('Displacement (mm)'); title('Image Disp');
+                legend('dX','dY','dZ','Location','southoutside','NumColumns',3);
+                hold off
+                saveas(fig, fullfile(pwd,'output',filename))
+                close(fig)
+            end
 
             % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
             data = int16(255 - rgb2gray(imread(fullfile(pwd,'output',filename))))';
