@@ -1,5 +1,5 @@
 FROM ubuntu:jammy
-ARG  DEBIAN_FRONTEND=noninteractive
+#ARG  DEBIAN_FRONTEND=noninteractive
 ENV  TZ=America/Chicago
 
 # Folder name containing MATLAB installer file (must be in root folder of build context)
@@ -42,6 +42,7 @@ RUN apt-get update && \
 
 # MATLAB installer requires X11
 RUN apt-get update && apt-get install --no-install-recommends --no-install-suggests --yes xorg
+RUN apt install unzip
 
 # --------------------------------------------------------------------------------------------------
 #      Install MATLAB
@@ -61,11 +62,15 @@ RUN apt-get update && apt-get install --no-install-recommends --no-install-sugge
 #  3. The R2022a folder containing the downloaded installer files
 COPY installer_input_docker.txt /tmp/
 COPY license.lic                /tmp/
+COPY R2022a /tmp/R2022a
 
 # Run the MATLAB installer using the installer_input_docker.txt input.  Installer log messages are
 # not displayed in the console, but logged to /tmp/mathworks_root.log.  Check this file if errors
 # are encountered.
-RUN --mount=type=bind,source=R2022a,target=/tmp/R2022a /tmp/R2022a/install -inputFile /tmp/installer_input_docker.txt
+RUN chmod +x /tmp/R2022a/install
+RUN chmod +x /tmp/R2022a/bin/glnxa64/MathWorksProductInstaller
+RUN /tmp/R2022a/install -inputFile /tmp/installer_input_docker.txt
+#RUN --mount=type=bind,source=R2022a,target=/tmp/R2022a /tmp/R2022a/install -inputFile /tmp/installer_input_docker.txt
 
 # Some versions of the MATLAB installer do not copy the license file into the installation folder
 RUN mkdir -p /usr/local/MATLAB/R2022a/licenses
@@ -88,7 +93,8 @@ COPY license.lic /usr/local/MATLAB/R2022a/licenses
 #   docker run --hostname computername ...
 
 RUN ln -s /usr/local/MATLAB/R2022a/bin/matlab /usr/local/bin/matlab
-CMD [ "/usr/local/MATLAB/R2022a/bin/matlab"]
+WORKDIR "/opt/code/matlab-ismrmrd-server-master"
+#CMD [ "/usr/local/MATLAB/R2022a/bin/matlab"]
 
 # --------------------------------------------------------------------------------------------------
 #      Install MATLAB Compiled Runtime
@@ -100,13 +106,13 @@ CMD [ "/usr/local/MATLAB/R2022a/bin/matlab"]
 # Place this file in the root of the build context and use the following instead of the above "compiler.runtime.download" call:
 RUN mkdir /root/MCRInstaller9.12
 COPY MATLAB_Runtime_R2022a_Update_5_glnxa64.zip /root/MCRInstaller9.12/
-RUN /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setInstallerLocation('/root/MCRInstaller9.12/MATLAB_Runtime_R2022a_Update_1_glnxa64.zip'); quit"
+RUN /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setInstallerLocation('/root/MCRInstaller9.12/MATLAB_Runtime_R2022a_Update_5_glnxa64.zip'); quit"
 
 # Note: If a username-based MATLAB license file is used, then replace /root/ in the above commands
 # (3 instances) with /home/username/, where username is the licensed username.
 # RUN mkdir -p /home/kelvin/MCRInstaller9.12
 # COPY MATLAB_Runtime_R2022a_Update_5_glnxa64.zip /home/kelvin/MCRInstaller9.12/
-# RUN su kelvin && /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setInstallerLocation('/home/kelvin/MCRInstaller9.12/MATLAB_Runtime_R2022a_Update_1_glnxa64.zip'); quit"
+# RUN su kelvin && /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setInstallerLocation('/home/kelvin/MCRInstaller9.12/MATLAB_Runtime_R2022a_Update_5_glnxa64.zip'); quit"
 
 # # --------------------------------------------------------------------------------------------------
 # #      Copy MATLAB MRD Server code
@@ -114,12 +120,14 @@ RUN /usr/local/MATLAB/R2022a/bin/matlab -r "compiler.internal.runtime.utils.setI
 RUN apt-get update && apt-get install -y git
 RUN mkdir -p /opt/code
 RUN cd /opt/code \
-    && git clone https://github.com/kspaceKelvin/matlab-ismrmrd-server.git
+    && git clone https://github.com/panyue3/matlab-ismrmrd-server-master.git
 
 # Cleanup files not required after installation
 RUN apt-get remove git -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+    && rm -rf /tmp/R2022a
+    && rm -rf /opt/code/matlab-ismrmrd-server-master/output
 
 # # --------------------------------------------------------------------------------------------------
 # #      How to use this Docker image
@@ -134,18 +142,15 @@ RUN apt-get remove git -y \
 # #              -v /code:/code                                \ # Share a folder where code can accessed
 # #              -p 9002:9002                                  \ # Forward the MRD network port if testing the server
 # #               fire-matlab-compiler
-# #   docker run --rm -it --mac-address 02:42:ac:11:00:06 -p 9095:9095 -v /var/run/docker.sock:/var/run/docker.sock pany3/fire-matlab-server:debug
 # #
 # # In the MATLAB Command Prompt, change to the folder containing the server code:
-# #   cd /code/matlab-ismrmrd-server
+# #   cd /opt/code/matlab-ismrmrd-server
 # #
-# # Build the standalone application and a Docker image:    --- buildDocker.m ---
-# #   addpath('mex');
-# #   addpath(genpath('function'))
+# # Build the standalone application and a Docker image:
 # #   res = compiler.build.standaloneApplication('fire_matlab_ismrmrd_server.m', 'TreatInputsAsNumeric', 'on')
 # #   opts = compiler.package.DockerOptions(res, 'ImageName', 'fire-matlab-server')
 # #   compiler.package.docker(res, 'Options', opts)
 # #
 # # Quit MATLAB and exit the Docker container when complete.  The MCR Docker image should be visible
 # # on the host with the name 'fire-matlab-server'.  It can be started with:
-# #   docker run --rm -p 9095:9095 -v /C//Users/pan21/Desktop/DockerOut:/output --name aa fire-matlab-server 9095
+# #   docker run --rm -p 9002:9002 fire-matlab-server

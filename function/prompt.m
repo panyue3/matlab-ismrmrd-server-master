@@ -310,6 +310,9 @@ classdef prompt < handle
                 % === MOCO all images use end respiratory frame as reference ===
 
                 % +++ Save MOCOed images +++
+                if ~exist('output', 'dir')
+                    mkdir('output')
+                end
                 if ispc
                     clear im
                     tmp = split(metadata.measurementInformation.frameOfReferenceUID,'.');
