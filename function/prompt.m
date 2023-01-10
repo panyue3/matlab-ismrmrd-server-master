@@ -368,21 +368,22 @@ classdef prompt < handle
             if ispc
                 save(fullfile(pwd,'output',filename),'imshift');
             elseif isunix
-                save(fullfile(pwd,'/tmp/share',filename),'imshift')
+                if ~exist('/tmp/share', 'dir')
+                    mkdir('tmp/share')
+                end
+                save(fullfile('/tmp/share',filename),'imshift')
             end
 
-            if ispc
-                filename = sprintf("%s_%s.png",metadata.measurementInformation.protocolName, tmp{11});
-                fig = figure;
-                hold on
-                plot(imshift(:,1),'k'); plot(imshift(:,2),'k--'); plot(imshift(:,3),'k:');
-                xlim([0 size(imshift,1)]);
-                ylabel('Displacement (mm)'); title('Image Disp');
-                legend('dX','dY','dZ','Location','southoutside','NumColumns',3);
-                hold off
-                saveas(fig, fullfile(pwd,'output',filename))
-                close(fig)
-            end
+            filename = sprintf("%s_%s.png",metadata.measurementInformation.protocolName, tmp{11});
+            fig = figure;
+            hold on
+            plot(imshift(:,1),'k'); plot(imshift(:,2),'k--'); plot(imshift(:,3),'k:');
+            xlim([0 size(imshift,1)]);
+            ylabel('Displacement (mm)'); title('Image Disp');
+            legend('dX','dY','dZ','Location','southoutside','NumColumns',3);
+            hold off
+            saveas(fig, fullfile(pwd,'output',filename))
+            close(fig)
 
             % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
             data = int16(255 - rgb2gray(imread(fullfile(pwd,'output',filename))))';
