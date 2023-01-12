@@ -95,75 +95,30 @@ classdef prompt < handle
 
             if ~isempty(imgGroup)
                 logging.info("Processing a group of images (untriggered)")
-                image = obj.process_images(imgGroup, config, metadata, logging);
+                [image, imshift] = obj.process_images(imgGroup, config, metadata, logging);
                 logging.debug("Sending image to client");
                 connection.send_image(image);
                 imgGroup = cell(1,0);
             end
 
+%             if ~isempty(wavGroup)
+%                 logging.info("Processing a group of PT data (untriggered)")
+%                 ptdata = obj.process_pt(wavGroup, config, metadata, logging);
+%                 wavGroup = cell(1,0);
+%                 % run prediction and save network
+%                 obj.run_predict(imshift, ptdata);
+%             else
+%                 logging.info("PT data was not received.")
+%             end
+%             [ptdata, param] = obj.process_pt(wavGroup, config, metadata, logging);
+%             obj.run_predict(imshift, ptdata, param);
+
             connection.send_close();
             return
         end  % end of process()
 
-        %% PROCESS_RAW
-        function image = process_raw(obj, group, config, metadata, logging)
-            % This function assumes that the set of raw data belongs to a
-            % single image.  If there's >1 phases, echos, sets, etc., then
-            % either the call to this function from process() needs to be
-            % adjusted or this code must be modified.
-
-            % Format data into a single [RO PE cha] array
-            ksp = cell2mat(permute(cellfun(@(x) x.data, group, 'UniformOutput', false), [1 3 2]));
-            ksp = permute(ksp, [1 3 2]);
-
-            % Fourier Transform
-            img = fftshift(fft2(ifftshift(ksp)));
-
-            % Sum of squares coil combination
-            img = sqrt(sum(abs(img).^2,3));
-
-            % Remove phase oversampling
-            img = img(round(size(img,1)/4+1):round(size(img,1)*3/4),:);
-            logging.debug("Image data is size %d x %d after coil combine and phase oversampling removal", size(img))
-
-            % Normalize and convert to short (int16)
-            img = img .* (32767./max(img(:)));
-            img = int16(round(img));
-
-            % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
-            image = ismrmrd.Image(img);
-
-            % Find the center k-space index
-            kspace_encode_step_1 = cellfun(@(x) x.head.idx.kspace_encode_step_1, group);
-            centerLin            = cellfun(@(x) x.head.idx.user(6),              group);
-            centerIdx = find(kspace_encode_step_1 == centerLin, 1);
-
-            % Copy the relevant AcquisitionHeader fields to ImageHeader
-            image.head.fromAcqHead(group{centerIdx}.head);
-
-            % field_of_view is mandatory
-            image.head.field_of_view  = single([metadata.encoding(1).reconSpace.fieldOfView_mm.x ...
-                metadata.encoding(1).reconSpace.fieldOfView_mm.y ...
-                metadata.encoding(1).reconSpace.fieldOfView_mm.z]);
-
-            % Set ISMRMRD Meta Attributes
-            meta = struct;
-            meta.DataRole               = 'Image';
-            meta.ImageProcessingHistory = 'MATLAB';
-            meta.WindowCenter           = uint16(16384);
-            meta.WindowWidth            = uint16(32768);
-            meta.ImageRowDir            = group{centerIdx}.head.read_dir;
-            meta.ImageColumnDir         = group{centerIdx}.head.phase_dir;
-
-            % set_attribute_string also updates attribute_string_len
-            image = image.set_attribute_string(ismrmrd.Meta.serialize(meta));
-
-            % Call process_image to do actual image inversion
-            image = obj.process_images({image});
-        end     % end of process_raw()
-
         %% PROCESS_IMAGES
-        function image = process_images(obj, group, config, metadata, logging)
+        function [image, imshift] = process_images(obj, group, config, metadata, logging)
             % Extract image data
             nOri = max(cell2mat(cellfun(@(x) x.head.slice, group, 'UniformOutput', false))) + 1;
             nRep = max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1;
@@ -234,42 +189,46 @@ classdef prompt < handle
                 BSer = imAll(:,:,:,iOri);
 
                 if iOri ==1
-                    if  imOri(1) == 3
-                        switch moco
-                            case 1
-                                [~,Dx] = mocoDisp(BSer(:,:,2:11), 5, param.mocoReg);
-                                parfor ii = 1:10
-                                    Dx_crop(:,:,ii) = imcrop(Dx(:,:,ii),rectSer);
-                                end
-                            case 2
-                                Dx_crop = zeros([round(size(imAll,[1 2])/3),10]);
-                                parfor ii = 1:10
-                                    [~, ~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
-                                    Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
-                                end
-                        end
+                    if nRep > 10
+                        if  imOri(1) == 3
+                            switch moco
+                                case 1
+                                    [~,Dx] = mocoDisp(BSer(:,:,2:11), 5, param.mocoReg);
+                                    parfor ii = 1:10
+                                        Dx_crop(:,:,ii) = imcrop(Dx(:,:,ii),rectSer);
+                                    end
+                                case 2
+                                    Dx_crop = zeros([round(size(imAll,[1 2])/3),10]);
+                                    parfor ii = 1:10
+                                        [~, ~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
+                                        Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
+                                    end
+                            end
 
-                        [~, idxMax] = max(squeeze(mean(Dx_crop, [1,2]))*imDir(1));
-                        [~, idxMin] = min(squeeze(mean(Dx_crop, [1,2]))*imDir(1));
-                        idx = round(mean([idxMax, idxMin])) + double(idxMax>idxMin);
+                            [~, idxMax] = max(squeeze(mean(Dx_crop, [1,2]))*imDir(1));
+                            [~, idxMin] = min(squeeze(mean(Dx_crop, [1,2]))*imDir(1));
+                            idx = round(mean([idxMax, idxMin])) + double(idxMax>idxMin);
+                        else
+                            switch moco
+                                case 1
+                                    [Dx,~] = mocoDisp(BSer(:,:,2:11), 5, param.mocoReg);
+                                    parfor ii = 1:10
+                                        Dx_crop(:,:,ii) = imcrop(Dx(:,:,ii),rectSer);
+                                    end
+                                case 2
+                                    Dx_crop = zeros([round(size(BSer,[1 2])/3),10]);
+                                    parfor ii = 1:10
+                                        [~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
+                                        Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
+                                    end
+                            end
+
+                            [~, idxMax] = max(squeeze(mean(Dx_crop, [1,2]))*imDir(2));
+                            [~, idxMin] = min(squeeze(mean(Dx_crop, [1,2]))*imDir(2));
+                            idx = round(mean([idxMax, idxMin])) + double(idxMax>idxMin);
+                        end
                     else
-                        switch moco
-                            case 1
-                                [Dx,~] = mocoDisp(BSer(:,:,2:11), 5, param.mocoReg);
-                                parfor ii = 1:10
-                                    Dx_crop(:,:,ii) = imcrop(Dx(:,:,ii),rectSer);
-                                end
-                            case 2
-                                Dx_crop = zeros([round(size(BSer,[1 2])/3),10]);
-                                parfor ii = 1:10
-                                    [~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
-                                    Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
-                                end
-                        end
-
-                        [~, idxMax] = max(squeeze(mean(Dx_crop, [1,2]))*imDir(2));
-                        [~, idxMin] = min(squeeze(mean(Dx_crop, [1,2]))*imDir(2));
-                        idx = round(mean([idxMax, idxMin])) + double(idxMax>idxMin);
+                        idx = round(nRep/2);
                     end
                 end
                 % === Find end respiratory frame by MOCO first 10 frame ===
@@ -389,7 +348,7 @@ classdef prompt < handle
             close(fig)
 
             % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
-            data = int16(255 - rgb2gray(imread(fullfile(pwd,'output',filename))))';
+            data = uint16(255 - rgb2gray(imread(fullfile(pwd,'output',filename))))';
             image = ismrmrd.Image(data);
 
             % Copy original image header, but keep the new data_type
@@ -400,9 +359,28 @@ classdef prompt < handle
 
             % Add to ImageProcessingHistory
             meta = ismrmrd.Meta.deserialize(group{1}.attribute_string);
-            meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'ImageShift');
+            meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'Cardiac Shift');
+            meta = ismrmrd.Meta.appendValue(meta, 'WindowCenter', 40);
+            meta = ismrmrd.Meta.appendValue(meta, 'WindowWidth', 80);
+            meta = rmfield(meta, 'FrameOfReference');
             image = image.set_attribute_string(ismrmrd.Meta.serialize(meta));
 
         end     % end of process_images()
+
+        %% PROCESS_IMAGES
+        function [ptdata, param] = process_pt(obj, group, config, metadata, logging)
+            % Arrange raw PT
+%             pt_raw = load('PTdata_MID01848.txt');
+
+            % Process PT
+            [ptdata, pttime, param] = ProcessPT(pt_raw);
+            plot(pttime,ptdata)
+
+        end
+
+        %% RUN_PREDICT
+        function run_predict(obj, imshift, ptdata, param)
+        end
+
     end
 end
