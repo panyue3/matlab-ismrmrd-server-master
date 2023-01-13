@@ -2,7 +2,7 @@
 
 if [ $# -eq 1 ]; then
     LOG_FILE=${1}
-    matlab -nodesktop -nosplash -r "cd /opt/code/fire-matlab-ismrmrd-server/;fire_matlab_ismrmrd_server(9095,'${LOG_FILE}')"
+    docker run --rm -p 9095:9095 fire-matlab-server 9095 LOG_FILE
 else
-    matlab -nodesktop -nosplash -r "cd /opt/code/fire-matlab-ismrmrd-server/;fire_matlab_ismrmrd_server(9095)"
+    docker run --rm -p 9095:9095 fire-matlab-server 9095
 fi

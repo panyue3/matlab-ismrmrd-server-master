@@ -5,7 +5,10 @@ docker run --rm -p 9095:9095 --name aa -v /C//Users/pan21/Desktop/DockerOut:/tmp
 UPDATE MATLAB CODE
 cd /opt/code
 apt-get update && apt-get install -y git
+rm -r matlab-ismrmrd-server-master
 git clone https://github.com/panyue3/matlab-ismrmrd-server-master.git
+cd mmatlab-ismrmrd-server-master
+matlab -r buildDocker
 
 BUILD CHROOT
 docker create --name tmpimage fire-matlab-server:latest
