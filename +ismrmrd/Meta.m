@@ -136,7 +136,9 @@ classdef Meta
                     % Floats may have decimals or exponents
                     if all(((uint8(values{iVal}) >= uint8('0')) & (uint8(values{iVal}) <= uint8('9'))) | ...
                                  ((uint8(values{iVal}) == uint8('-')) | (uint8(values{iVal}) == uint8('.')) | (uint8(values{iVal}) == uint8('e'))))
-                        values{iVal} = str2double(values{iVal});
+                        if sum(uint8(values{iVal}) == uint8('.')) <= 1
+                            values{iVal} = str2double(values{iVal});
+                        end
                     end
         
                     if (numel(values) == 1)

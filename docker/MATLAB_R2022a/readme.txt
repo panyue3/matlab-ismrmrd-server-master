@@ -1,13 +1,14 @@
 sudo DOCKER_BUILDKIT=1 docker build --tag=fire_matlab_ismrmrd_server .
 docker run --rm -it --name aa --mac-address 02:42:ac:11:00:06 -p 9095:9095 -v /var/run/docker.sock:/var/run/docker.sock -v /C//Users/pan21/Desktop/DockerOut:/tmp/share pany3/fire-matlab-server:debug
 docker run --rm -p 9095:9095 --name aa -v /C//Users/pan21/Desktop/DockerOut:/tmp/share fire-matlab-server 9095
+docker run -it --rm --entrypoint=/bin/bash fire-matlab-server
 
 UPDATE MATLAB CODE
 cd /opt/code
 apt-get update && apt-get install -y git
 rm -r matlab-ismrmrd-server-master
 git clone https://github.com/panyue3/matlab-ismrmrd-server-master.git
-cd mmatlab-ismrmrd-server-master
+cd matlab-ismrmrd-server-master
 matlab -r buildDocker
 
 BUILD CHROOT
