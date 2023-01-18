@@ -8,7 +8,7 @@ function fire_matlab_ismrmrd_server(varargin)
     end
 
     if nargin < 1
-        port = 9002; 
+        port = 9095; 
     else
         port = varargin{1};
     end

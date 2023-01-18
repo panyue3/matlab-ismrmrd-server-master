@@ -194,7 +194,6 @@ classdef invertcontrast < handle
                 % Add to ImageProcessingHistory
                 meta = ismrmrd.Meta.deserialize(group{iImg}.attribute_string);
                 meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'INVERT');
-                meta = rmfield(meta, 'FrameOfReference');
                 image = image.set_attribute_string(ismrmrd.Meta.serialize(meta));
 
                 images{iImg} = image;
