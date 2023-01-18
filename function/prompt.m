@@ -192,7 +192,7 @@ classdef prompt < handle
             if ispc
                 ptdata.rawdata = load('C:\MIDEA\NXVA31A_176478\src\MrVista\Simu\PTdata.txt');
             elseif isunix
-                ptdata.rawdata = load('\tmp\share\PTdata.txt');
+                ptdata.rawdata = load('/tmp/share/PTdata.txt');
             end
 
             % Process PT
