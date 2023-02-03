@@ -1,4 +1,4 @@
-function imshift = calcImageShift(group, metadata, logging)
+function imshift = calculateImageShift(group, metadata, logging)
 
 % Set MOCO parameters
 moco = 2; % MOCO method: 1 - Siemens, 2 - Demon
@@ -152,8 +152,8 @@ for iOri = 1:nOri
     % +++ Save MOCOed images +++
     if ispc
         clear im
-        tmp = split(metadata.measurementInformation.frameOfReferenceUID,'.');
-        filename = sprintf("IMG_MOCO_Ori%i_%s_%s.gif",iOri,metadata.measurementInformation.protocolName, tmp{11});
+        tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
+        filename = sprintf("%s.%s_%s_IMG_MOCO_Ori%i.gif",tmp{11}, tmp{end}, metadata.measurementInformation.protocolName, iOri);
         for iRep = 1:nRep
             im = uint8(Icomb(:,:,iRep)/max(Iref(:))*255);
 
@@ -197,7 +197,7 @@ end    % end of count Ori
 
 % Save NMSE plot
 if ispc
-    filename = sprintf("%s_%s_NMSE.png",metadata.measurementInformation.protocolName, tmp{11});
+    filename = sprintf("%s.%s_%s_NMSE.png", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
     saveas(fig, fullfile(pwd,'output',filename))
     close(fig)
 end

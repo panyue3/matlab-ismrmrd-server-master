@@ -1,7 +1,7 @@
 function [respPT, respTime, param] = processPT(PTData, logging)
 
 %% Define parameters
-param.dsRate = 500;
+param.dsRate = 400;
 param.numPT = 2000/param.dsRate; % number of PT per second
 param.numVCha = 1;
 
@@ -18,7 +18,7 @@ if rem(length(time),2)
     time(end) = [];
 end
 
-logging.info("Total scan time: %.2f sec.\n",max(validTime))
+logging.info("Total scan time: %.2f sec.",max(validTime))
 
 validData = interp1(validTime, PTData,time,'pchip');
 filtData = zeros(size(validData));
@@ -29,8 +29,8 @@ dsData = downsample(filtData(:,1:2:end) + filtData(:,2:2:end)*1i,param.dsRate);
 respTime = downsample(time,param.dsRate);
 
 % ROVir
-fROI = [0.1 0.8]; % MiniFlash - [0.1 1.8] Beat_PT - [0.1 3]
-fInt = [0 0.05 1 Inf]; % MiniFlash - 1.95 Beat_PT - 4
+fROI = [0.1 0.8];
+fInt = [1 Inf];
 
 % compute frequency
 fs = 1/dt/param.dsRate;                  % Sampling frequency
@@ -44,8 +44,7 @@ ROI = X;
 ROI((f<-fROI(2) | (f>-fROI(1) & f<fROI(1)) | f>fROI(2)),:) = 0;
 
 Int = X;
-% Int((f>-fInt(3) & f<-fInt(2)) | (f>fInt(2) & f<fInt(3)),:) = 0;
-Int(f>-fInt(3) & f<fInt(3),:) = 0;
+Int(f>-fInt(1) & f<fInt(1),:) = 0;
 
 cROI = cov(ROI);
 cInt = cov(Int);
@@ -66,7 +65,6 @@ respTime(1,:) = [];
 
 % find cardiac trigger
 [~, pk] = findpeaks(timeAfterRF,"MinPeakHeight", 0.05*max(timeAfterRF));
-pk = [find(timeAfterRF==-1,1,"last"); pk];
-param.pk = round(pk/param.dsRate);
+param.pk = [1; round(pk/param.dsRate)];
 
 end

@@ -9,7 +9,13 @@ classdef prompt < handle
                 mkdir('output')
             end
             if isunix && ~exist('/tmp/share', 'dir')
-                    mkdir('tmp/share')
+                mkdir('tmp/share')
+            end
+
+            if contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
+                runTraining = true;
+            else
+                runTraining = false;
             end
 
             % Metadata should be MRD formatted header, but may be a string
@@ -41,38 +47,22 @@ classdef prompt < handle
                     % Raw k-space data messages
                     % ----------------------------------------------------------
                     if isa(item, 'ismrmrd.Acquisition')
-                        % Accumulate all imaging readouts in a group
-                        if (~item.head.flagIsSet(item.head.FLAGS.ACQ_IS_NOISE_MEASUREMENT)    && ...
-                            ~item.head.flagIsSet(item.head.FLAGS.ACQ_IS_PHASECORR_DATA)       && ...
-                            ~item.head.flagIsSet(item.head.FLAGS.ACQ_IS_PARALLEL_CALIBRATION)       )
-                                acqGroup{end+1} = item;
-                        end
-
-                        % When this criteria is met, run process_raw() on the accumulated
-                        % data, which returns images that are sent back to the client.
-                        if item.head.flagIsSet(item.head.FLAGS.ACQ_LAST_IN_MEASUREMENT)
-                            logging.info("Do nothing to k-space data")
-                            acqGroup = cell(1,0);
-                        end
+                        logging.info("Do nothing to k-space data")
 
                     % ----------------------------------------------------------
                     % Image data messages
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
-                        % Only process magnitude images -- send phase images back without modification
-                        if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
-                            imgGroup{end+1} = item;
-                        end
+                        if runTraining
+                            % Only process magnitude images -- send phase images back without modification
+                            if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
+                                imgGroup{end+1} = item;
+                            end
+                        else
+                            logging.info("Running image shift prediction...");
+                            shiftvector = obj.run_predict(wavGroup, metadata, logging);
 
-                        % When this criteria is met, run process_group() on the accumulated
-                        % data, which returns images that are sent back to the client.
-                        % TODO: logic for grouping images
-                        if false
-                            logging.info("Processing a group of images")
-                            image = obj.process_images(imgGroup, config, metadata, logging);
-                            logging.debug("Sending image to client")
-                            connection.send_image(image);
-                            imgGroup = cell(1,0);
+                            % ++++++++++ SEND SHIFTVECTOR TO SEQUENCE ++++++++++ %
                         end
 
                     % ----------------------------------------------------------
@@ -92,67 +82,71 @@ classdef prompt < handle
                 logging.error(sprintf('%s\nError in %s (%s) (line %d)', ME.message, ME.stack(1).('name'), ME.stack(1).('file'), ME.stack(1).('line')));
             end
 
-            % Process any remaining groups of raw or image data.  This can
-            % happen if the trigger condition for these groups are not met.
-            % This is also a fallback for handling image data, as the last
-            % image in a series is typically not separately flagged.
-            if ~isempty(acqGroup)
-                logging.info("Do nothing to k-space data (untriggered)")
-                acqGroup = cell(1,0);
-            end
-
-            if ~isempty(imgGroup)
-                logging.info("Processing a group of images (untriggered)")
-                [image, imshift] = obj.process_images(imgGroup, config, metadata, logging);
-                logging.debug("Sending image to client");
-                connection.send_image(image);
-                %------ Temporarily used as wavGroup for image header ------%
-                saveHead = imgGroup(1);  
-                %------ Remember to delete when wavGroup available --------%
-                imgGroup = cell(1,0);
-            else
-                logging.warn("Image was not received.")
-            end
-
-%             if ~isempty(wavGroup)
-%                 logging.info("Processing a group of PT data (untriggered)")
-%                 [image, ptdata] = obj.process_waveform(wavGroup, config, metadata, logging);
-%                 logging.debug("Sending image to client");
-%                 connection.send_image(image);
-%                 wavGroup = cell(1,0);
-%             else
-%                 logging.warn("PT data was not received.")
-%             end
-            [image, ptdata] = obj.process_waveform(saveHead, config, metadata, logging);
-            logging.debug("Sending image to client");
-            connection.send_image(image);
-
-            % Save image and pt data and train network
-            if exist('imshift','var') && exist('ptdata','var')
-                tmp = split(metadata.measurementInformation.frameOfReferenceUID,'.');
-                filename = sprintf("%s_%s.mat",metadata.measurementInformation.protocolName, tmp{11});
-                if ispc
-                    save(fullfile(pwd,'output',filename),'imshift', 'ptdata');
-                elseif isunix
-                    save(fullfile('/tmp/share',filename),'imshift', 'ptdata');
+            if runTraining
+                % ----------------------------------------------------------
+                % Raw k-space data group
+                % ----------------------------------------------------------
+                if ~isempty(acqGroup)
+                    logging.info("Do nothing to k-space data (untriggered)")
+                    acqGroup = cell(1,0);
                 end
 
-                % Run prediction
-                logging.info("Training network")
-%                 runPredict(imshift, ptdata, logging);
-            else
-                logging.error("Processed PT or image shift data not found")
-            end
+                % ----------------------------------------------------------
+                % Image data group
+                % ----------------------------------------------------------
+                if ~isempty(imgGroup)
+                    logging.info("Processing a group of images (untriggered)")
+                    [image, imshift] = obj.process_images(imgGroup, metadata, logging);
+                    logging.debug("Sending image to client");
+                    connection.send_image(image);
+                    % Save header info for image generation
+                    info.head = imgGroup{1}.head;
+                    info.attribute_string = imgGroup{1}.attribute_string;
+                    %------ Temporarily used as wavGroup for image header ------%
+                    saveHead = imgGroup(1);
+                    %------ Remember to delete when wavGroup available --------%
+                    imgGroup = cell(1,0);
+                else
+                    logging.warn("Image was not received.")
+                end
+
+                % ----------------------------------------------------------
+                % Waveform data group
+                % ----------------------------------------------------------
+                %             if ~isempty(wavGroup)
+                %                 logging.info("Processing a group of PT data (untriggered)")
+                %                 [image, ptdata] = obj.process_waveform(wavGroup, metadata, logging);
+                %                 logging.debug("Sending image to client");
+                %                 connection.send_image(image);
+                %                 wavGroup = cell(1,0);
+                %             else
+                %                 logging.warn("PT data was not received.")
+                %             end
+                [image, ptdata] = obj.process_waveform(saveHead, metadata, logging);
+                logging.debug("Sending image to client");
+                connection.send_image(image);
+
+                % ----------------------------------------------------------
+                % Run network training
+                % ----------------------------------------------------------
+                if exist('imshift','var') && exist('ptdata','var')
+                    image = obj.train_network(imshift, ptdata, info, metadata, logging);
+                    logging.debug("Sending image to client");
+                    connection.send_image(image);
+                else
+                    logging.error("Processed PT or image shift data not found")
+                end
+            end     % if runTraining
 
             connection.send_close();
             return
         end  % end of process()
 
         %% PROCESS_IMAGES
-        function [image, imshift] = process_images(obj, group, config, metadata, logging)
+        function [image, imshift] = process_images(obj, group, metadata, logging)
 
             % Calculate image shift
-            imshift = calcImageShift(group, metadata, logging);
+            imshift = calculateImageShift(group, metadata, logging);
 
             % Save figure to output folder
             fig = figure;
@@ -165,30 +159,15 @@ classdef prompt < handle
             saveas(fig, fullfile(pwd,'output','Disp.png'))
             close(fig)
 
-            % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
             data = uint16(255 - rgb2gray(imread(fullfile(pwd,'output','Disp.png'))))';
-            image = ismrmrd.Image(data);
-
-
-            % Copy original image header, but keep the new data_type
-            data_type = image.head.data_type;
-            image.head = group{1}.head;
-            image.head.data_type = data_type;
-            image.head.matrix_size = size(data, [1 2 3]);
-
-            % Add to ImageProcessingHistory
-            meta = ismrmrd.Meta.deserialize(group{1}.attribute_string);
-            meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'Cardiac Shift');
-            meta = ismrmrd.Meta.appendValue(meta, 'WindowCenter', 40);
-            meta = ismrmrd.Meta.appendValue(meta, 'WindowWidth', 80);
-            image = image.set_attribute_string(ismrmrd.Meta.serialize(meta));
+            image = obj.pack_image(data, group{1}.head, group{1}.attribute_string);
 
         end     % end of process_images()
 
-        %% PROCESS_IMAGES
-        function [image, ptdata] = process_waveform(obj, group, config, metadata, logging)
+        %% PROCESS_WAVEFORM
+        function [image, ptdata] = process_waveform(obj, group, metadata, logging)
 
-            % Read raw PT 
+            % Read raw PT
             if ispc
                 ptdata.rawdata = load('C:\MIDEA\NXVA31A_176478\src\MrVista\Simu\PTdata.txt');
             elseif isunix
@@ -209,24 +188,101 @@ classdef prompt < handle
             saveas(fig, fullfile(pwd,'output','PT.png'))
             close(fig)
 
-            % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
             data = uint16(255 - rgb2gray(imread(fullfile(pwd,'output','PT.png'))))';
+            image = obj.pack_image(data, group{1}.head, group{1}.attribute_string);
+
+        end     % end of process_waveform()
+
+        %% TRAIN_NETWORK
+        function image = train_network(obj, imshift, ptdata, info, metadata, logging)
+
+            tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
+            filename = sprintf("%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
+            if ispc
+                save(fullfile(pwd,'output',filename),'imshift', 'ptdata');
+            elseif isunix
+                save(fullfile('/tmp/share',filename),'imshift', 'ptdata');
+            end
+
+            % Run training
+            ptdata.param.cor = sign(corr(imshift(:,3),ptdata.data(ptdata.param.pk,:)));
+            ptdata.data = ptdata.data * diag(ptdata.param.cor);
+
+            logging.info("Training network...")
+            [net, param] = runTraining(imshift, ptdata, logging);
+            param.coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
+            [~, idx] = sort(param.coils);
+            param.coils = param.coils(idx);
+            if ispc
+                save(fullfile(pwd,'output',filename),'net', 'param', '-append');
+            elseif isunix
+                save(fullfile('/tmp/share',filename),'net', 'param', '-append');
+            end
+
+            data = uint16(255 - rgb2gray(imread(param.figName)))';
+            image = obj.pack_image(data, info.head, info.attribute_string);
+
+        end     % end of train_network()
+
+        %% RUN_PREDICT
+        function shiftvector = run_predict(obj, group, metadata, logging)
+
+            % Load training result. If multiple training was done, read in the last file generated
+            tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
+            filename = sprintf("%s.*.mat", tmp{11});
+            if ispc
+                trainlist = dir(fullfile(pwd,'output',filename));
+            elseif isunix
+                trainlist = dir(fullfile('/tmp/share',filename));
+            end
+
+            if isempty(trainlist) || ~contains([trainlist.name],'train', 'IgnoreCase', true)
+                logging.error("Training was not performed.")
+            else
+                [~,idx] = sort([trainlist.datenum]);
+                trainlist = trainlist(idx);
+                while ~contains(trainlist(end).name,'train', 'IgnoreCase', true)
+                    trainlist(end) = [];
+                end
+                load(fullfile(trainlist(end).folder,trainlist(end).name), 'net', 'param')
+
+                % Check if coils match training series
+                coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
+                [~, idx] = sort(coils);
+                coils = coils(idx);
+                if ~matches(cell2str(coils),cell2str(param.coils),"IgnoreCase",true)
+                    logging.error("Receiver coils turned on do not match the training series.")
+                end
+
+                % ++++++++++ PROCESS PT +++++++++%
+
+                % ++++++++++ RUN PREDICTION +++++++++%
+
+
+            end
+
+        end     % end of run_predict()
+
+        %% PACK_IMAGE
+        function image = pack_image(obj, data, head, attribute_string)
+
+            % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
             image = ismrmrd.Image(data);
 
             % Copy original image header, but keep the new data_type
             data_type = image.head.data_type;
-            image.head = group{1}.head;
+            image.head = head;
             image.head.data_type = data_type;
             image.head.matrix_size = size(data, [1 2 3]);
 
             % Add to ImageProcessingHistory
-            meta = ismrmrd.Meta.deserialize(group{1}.attribute_string);
-            meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'Processed PT');
+            meta = ismrmrd.Meta.deserialize(attribute_string);
+            meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'PROMPT');
             meta = ismrmrd.Meta.appendValue(meta, 'WindowCenter', 40);
             meta = ismrmrd.Meta.appendValue(meta, 'WindowWidth', 80);
             image = image.set_attribute_string(ismrmrd.Meta.serialize(meta));
 
-        end     % end of process_waveform()
+        end % end of pack_image
 
     end
 end
