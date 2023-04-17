@@ -1,6 +1,7 @@
 function fire_matlab_ismrmrd_server(varargin)
     addpath('mex');
     addpath(genpath('function'))
+    setPlotDefault
     if(isOctave)
         javaaddpath('/usr/share/java/xercesImpl.jar');
         javaaddpath('/usr/share/java/xml-apis.jar');
@@ -14,7 +15,11 @@ function fire_matlab_ismrmrd_server(varargin)
     end
     
     if nargin < 2
-        logfile = '';
+        if ispc
+            logfile = '';
+        else
+            logfile = sprintf('/tmp/share/prompt/logfile_%s.log', datestr(now,'yyyy-mm-dd-HH-MM-SS'));
+        end
     else
         logfile = varargin{2};
     end

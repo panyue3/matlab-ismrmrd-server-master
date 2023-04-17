@@ -1,7 +1,7 @@
-function imshift = calculateImageShift(group, metadata, logging)
+function [imshift, isoutlier] = calculateImageShift(group, metadata, logging)
 
 % Set MOCO parameters
-moco = 2; % MOCO method: 1 - Siemens, 2 - Demon
+moco = 1; % MOCO method: 1 - Siemens, 2 - Demon
 param.mocoReg = 12;
 Options.SigmaFluid = 5;
 Options.SigmaDiff = 1;
@@ -23,8 +23,8 @@ try
 catch
     for iOri = 2:nOri
         if sum(size(cData{1}) ~= size(cData{iOri}))
-            isFlip(iOri) = true;
-            for ii = iOri:nOri:numel(cData)
+            isFlip(1) = true;
+            for ii = 1:nOri:numel(cData)
                 cData{ii} = transpose(cData{ii});
             end
         end
@@ -43,10 +43,25 @@ for iOri = 1:nOri
 end
 imAll = permute(imAll, [2, 1, 3, 4]);
 
+if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
+    ref = load('Ref.mat');
+    if all(isFlip == ref.isFlip)
+        try
+            imAll = cat(3, ref.refIma, imAll);
+            nRep = nRep + 1;
+        catch
+            logging.warn("Can not concatenate images, no external reference used.")
+        end
+    else
+        logging.warn("Can not concatenate images, no external reference used.")
+    end
+end
+
 % Run MOCO
 rectSer = centerCropWindow2d(size(imAll,[1 2]),round(size(imAll,[1 2])/3));
 imshift = nan(nRep,3);
-nmse = nan(nOri, nRep);
+nmse = nan(nRep,nOri);
+isoutlier = false(nRep,1);
 for iOri = 1:nOri
     % +++ Find image orientation +++
     [readphaseDir, readphaseOri] = max(abs([group{iOri}.head.read_dir; group{iOri}.head.phase_dir]),[],2);
@@ -64,13 +79,19 @@ for iOri = 1:nOri
             imOri = [2 3];
             imDir = [1 -1];
     end
+    if isFlip(iOri)
+        imOri = flip(imOri);
+        imDir = flip(imDir);
+    end
     % === Find image orientation ===
 
     % +++ Find end respiratory frame by MOCO first 10 frame +++
     BSer = imAll(:,:,:,iOri);
 
     if iOri ==1
-        if nRep > 10
+        if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true) && nRep ==51
+            idx = 1;
+        elseif nRep > 10
             if  imOri(1) == 3
                 switch moco
                     case 1
@@ -111,6 +132,11 @@ for iOri = 1:nOri
         else
             idx = round(nRep/2);
         end
+
+        if contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
+            refIma = imAll(:,:,idx,:);
+            save('Ref.mat', 'refIma','isFlip')
+        end
     end
     % === Find end respiratory frame by MOCO first 10 frame ===
 
@@ -129,7 +155,7 @@ for iOri = 1:nOri
 
                 % Calculate NMSE
                 Ireg = imcrop(Am_Ser(:,:,iRep),rectSer);
-                nmse(iOri,iRep) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
+                nmse(iRep,iOri) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
             end
         case 2
             Dx_Ser_crop = nan([round(size(BSer,[1 2])/3),nRep]);
@@ -144,7 +170,7 @@ for iOri = 1:nOri
                 Ireg = imcrop(Ireg,rectSer);
 
                 % Calculate NMSE
-                nmse(iOri,iRep) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
+                nmse(iRep,iOri) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
             end
     end
     % === MOCO all images use end respiratory frame as reference ===
@@ -166,14 +192,23 @@ for iOri = 1:nOri
     end
     % === Save MOCOed images ===
 
+    % +++ Save outlier +++
+    thrd = max([mean(nmse(:,iOri),'omitnan') + 3*std(nmse(:,iOri),[],'omitnan') 2.5*quantile(nmse(:,iOri), 0.75)-1.5*quantile(nmse(:,iOri), 0.25)]);
+    isoutlier(nmse(:,iOri) > thrd) = true;
+    % === Save outlier ===
+
     % +++ Plot NMSE  +++
     if ispc
-        setPlotDefault
-        nmse(iOri,1) = nan;
+        nmse(1,iOri) = nan;
         fig = figure(1);
         subplot(double(nOri),1,double(iOri))
-        plot(nmse(iOri,:))
-        title(sprintf('Ref frame %i, Mean NMSE x 1000: %0.2f',idx,mean(nmse(iOri,:),'omitnan')*1000))
+        plot(nmse(:,iOri),'*')
+        if sum(nmse(:,iOri) > thrd)
+            hold on
+            line([0 nRep],[thrd thrd],'Color','k','LineStyle','--')
+            hold off
+        end
+        title(sprintf('Ref frame %i, Mean NMSE x 1000: %0.2f',idx,mean(nmse(:,iOri),'omitnan')*1000))
     end
     % === Plot NMSE ===
 
@@ -181,7 +216,7 @@ for iOri = 1:nOri
     imDisp = [];
     imDisp(:,1) = squeeze(mean(mean(Dy_Ser_crop,1),2))*szPix(1)*szPix(2);
     imDisp(:,2) = squeeze(mean(mean(Dx_Ser_crop,1),2))*szPix(1)*szPix(2);
-    [~, iMin] = min(mean(nmse*1000,2,'omitnan'),[],'omitnan');
+    [~, iMin] = min(mean(nmse,'omitnan'),[],'omitnan');
     if iOri == iMin
         imshift(:,imOri) = imDisp .* imDir;
     else
@@ -194,6 +229,11 @@ for iOri = 1:nOri
     % === Save imshift ===
 
 end    % end of count Ori
+
+if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true) && nRep ==51
+    imshift(1,:) = [];
+    isoutlier(1) = [];
+end
 
 % Save NMSE plot
 if ispc

@@ -8,8 +8,8 @@ classdef prompt < handle
             if ~exist('output', 'dir')
                 mkdir('output')
             end
-            if isunix && ~exist('/tmp/share', 'dir')
-                mkdir('tmp/share')
+            if isunix && ~exist('/tmp/share/prompt', 'dir')
+                mkdir('/tmp/share/prompt')
             end
 
             if contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
@@ -60,7 +60,12 @@ classdef prompt < handle
                             end
                         else
                             logging.info("Running image shift prediction...");
-                            shiftvector = obj.run_predict(wavGroup, metadata, logging);
+                            %%%%%%%%%%%%% TEMP %%%%%%%%%%%%%%%
+                            if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
+                                imgGroup{end+1} = item;
+                            end
+                            %%%%%%%%%%%%% TEMP %%%%%%%%%%%%%%%
+%                             shiftvector = obj.run_predict(wavGroup, metadata, logging);
 
                             % ++++++++++ SEND SHIFTVECTOR TO SEQUENCE ++++++++++ %
                         end
@@ -82,21 +87,21 @@ classdef prompt < handle
                 logging.error(sprintf('%s\nError in %s (%s) (line %d)', ME.message, ME.stack(1).('name'), ME.stack(1).('file'), ME.stack(1).('line')));
             end
 
-            if runTraining
-                % ----------------------------------------------------------
-                % Raw k-space data group
-                % ----------------------------------------------------------
-                if ~isempty(acqGroup)
-                    logging.info("Do nothing to k-space data (untriggered)")
-                    acqGroup = cell(1,0);
-                end
+            % ----------------------------------------------------------
+            % Raw k-space data group
+            % ----------------------------------------------------------
+            if ~isempty(acqGroup)
+                logging.info("Do nothing to k-space data (untriggered)")
+                acqGroup = cell(1,0);
+            end
 
+            if runTraining
                 % ----------------------------------------------------------
                 % Image data group
                 % ----------------------------------------------------------
                 if ~isempty(imgGroup)
                     logging.info("Processing a group of images (untriggered)")
-                    [image, imshift] = obj.process_images(imgGroup, metadata, logging);
+                    [image, imdata] = obj.process_images(imgGroup, metadata, logging);
                     logging.debug("Sending image to client");
                     connection.send_image(image);
                     % Save header info for image generation
@@ -129,13 +134,53 @@ classdef prompt < handle
                 % ----------------------------------------------------------
                 % Run network training
                 % ----------------------------------------------------------
-                if exist('imshift','var') && exist('ptdata','var')
-                    image = obj.train_network(imshift, ptdata, info, metadata, logging);
+                if exist('imdata','var') && exist('ptdata','var')
+                    image = obj.train_network(imdata, ptdata, info, metadata, logging);
                     logging.debug("Sending image to client");
                     connection.send_image(image);
                 else
                     logging.error("Processed PT or image shift data not found")
                 end
+            %%%%%%%%%%%%% TEMP %%%%%%%%%%%%%%%
+            else
+                % ----------------------------------------------------------
+                % Image data group
+                % ----------------------------------------------------------
+                if ~isempty(imgGroup)
+                    logging.info("Processing a group of images (untriggered)")
+                    [image, imdata] = obj.process_images(imgGroup, metadata, logging);
+                    logging.debug("Sending image to client");
+                    connection.send_image(image);
+                    % Save header info for image generation
+                    info.head = imgGroup{1}.head;
+                    info.attribute_string = imgGroup{1}.attribute_string;
+                    %------ Temporarily used as wavGroup for image header ------%
+                    saveHead = imgGroup(1);
+                    %------ Remember to delete when wavGroup available --------%
+                    imgGroup = cell(1,0);
+                else
+                    logging.warn("Image was not received.")
+                end
+
+                % ----------------------------------------------------------
+                % Waveform data group
+                % ----------------------------------------------------------
+                if ~isempty(wavGroup)
+                    logging.info("Do nothing to waveform data (untriggered)")
+                    wavGroup = cell(1,0);
+                end
+
+                % ----------------------------------------------------------
+                % Run network testing
+                % ----------------------------------------------------------
+                if exist('imdata','var')
+                    image = obj.test_network(imdata, info, metadata, logging);
+                    logging.debug("Sending image to client");
+                    connection.send_image(image);
+                else
+                    logging.error("Image shift data not found")
+                end
+            %%%%%%%%%%%%% TEMP %%%%%%%%%%%%%%%
             end     % if runTraining
 
             connection.send_close();
@@ -143,16 +188,19 @@ classdef prompt < handle
         end  % end of process()
 
         %% PROCESS_IMAGES
-        function [image, imshift] = process_images(obj, group, metadata, logging)
+        function [image, imdata] = process_images(obj, group, metadata, logging)
 
             % Calculate image shift
-            imshift = calculateImageShift(group, metadata, logging);
+            [imdata.shiftvec, imdata.isoutlier]  = calculateImageShift(group, metadata, logging);
 
             % Save figure to output folder
             fig = figure;
             hold on
-            plot(imshift(:,1),'k'); plot(imshift(:,2),'k--'); plot(imshift(:,3),'k:');
-            xlim([0 size(imshift,1)]);
+            plot(imdata.shiftvec(:,1),'k:'); plot(imdata.shiftvec(:,2),'k--'); plot(imdata.shiftvec(:,3),'k');
+            if ~isempty(find(imdata.isoutlier, 1))
+                xline(find(imdata.isoutlier),'LineWidth',2,'Color',[0.7 0.7 0.7]); 
+            end
+            xlim([0 size(imdata.shiftvec,1)]);
             ylabel('Displacement (mm)'); title('Image Disp');
             legend('dX','dY','dZ','Location','southoutside','NumColumns',3);
             hold off
@@ -180,10 +228,9 @@ classdef prompt < handle
             % Save figure to output folder
             fig = figure;
             hold on
-            plot(ptdata.time, ptdata.data(:,1),'k'); plot(ptdata.time, ptdata.data(:,2),'k--');
+            plot(ptdata.time, ptdata.data,'k')
             xlim([0 max(ptdata.time)]);
-            title('First channel PT');
-            legend('Real','Imaginary','Location','southoutside','NumColumns',2);
+            title('PT');
             hold off
             saveas(fig, fullfile(pwd,'output','PT.png'))
             close(fig)
@@ -194,35 +241,127 @@ classdef prompt < handle
         end     % end of process_waveform()
 
         %% TRAIN_NETWORK
-        function image = train_network(obj, imshift, ptdata, info, metadata, logging)
+        function image = train_network(obj, imdata, ptdata, info, metadata, logging)
 
             tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
             filename = sprintf("%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
             if ispc
-                save(fullfile(pwd,'output',filename),'imshift', 'ptdata');
+                save(fullfile(pwd,'output',filename),'imdata', 'ptdata');
             elseif isunix
-                save(fullfile('/tmp/share',filename),'imshift', 'ptdata');
+                save(fullfile('/tmp/share/prompt',filename),'imdata', 'ptdata');
             end
 
             % Run training
-            ptdata.param.cor = sign(corr(imshift(:,3),ptdata.data(ptdata.param.pk,:)));
+            ptdata.param.cor = sign(corr(imdata.shiftvec(:,3),ptdata.data(ptdata.param.pk,:)));
             ptdata.data = ptdata.data * diag(ptdata.param.cor);
+            ptdata.param.M = ptdata.param.M .* ptdata.param.cor;
 
             logging.info("Training network...")
-            [net, param] = runTraining(imshift, ptdata, logging);
+            [net, param] = runTraining(imdata, ptdata, logging);
             param.coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
             [~, idx] = sort(param.coils);
             param.coils = param.coils(idx);
             if ispc
                 save(fullfile(pwd,'output',filename),'net', 'param', '-append');
             elseif isunix
-                save(fullfile('/tmp/share',filename),'net', 'param', '-append');
+                save(fullfile('/tmp/share/prompt',filename),'net', 'param', '-append');
             end
 
-            data = uint16(255 - rgb2gray(imread(param.figName)))';
-            image = obj.pack_image(data, info.head, info.attribute_string);
+            data = uint16(255 - rgb2gray(imread(param.figName{1})))';
+            image{1} = obj.pack_image(data, info.head, info.attribute_string);
+
+            data = uint16(255 - rgb2gray(imread(param.figName{2})))';
+            image{2} = obj.pack_image(data, info.head, info.attribute_string);
 
         end     % end of train_network()
+
+        %% TEST_NETWORK
+        function image = test_network(obj, imdata, info, metadata, logging)
+
+            % Load training result. If multiple training was done, read in the last file generated
+            tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
+            filename = sprintf("%s.*.mat", tmp{11});
+            if ispc
+                trainlist = dir(fullfile(pwd,'output',filename));
+            elseif isunix
+                trainlist = dir(fullfile('/tmp/share/prompt',filename));
+            end
+
+            if isempty(trainlist) || ~contains([trainlist.name],'train', 'IgnoreCase', true)
+                logging.error("Training was not performed.")
+            else
+                [~,idx] = sort([trainlist.datenum]);
+                trainlist = trainlist(idx);
+                while ~contains(trainlist(end).name,'train', 'IgnoreCase', true)
+                    trainlist(end) = [];
+                end
+                load(fullfile(trainlist(end).folder,trainlist(end).name), 'net', 'param')
+
+                % Check if coils match training series
+                coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
+                [~, idx] = sort(coils);
+                coils = coils(idx);
+                if ~matches(cell2str(coils),cell2str(param.coils),"IgnoreCase",true)
+                    logging.error("Receiver coils turned on do not match the training series.")
+                end
+
+                % Process PT
+                if ispc
+                    ptdata.rawdata = load('C:\MIDEA\NXVA31A_176478\src\MrVista\Simu\PTdata.txt');
+                elseif isunix
+                    ptdata.rawdata = load('/tmp/share/PTdata.txt');
+                end
+
+                PTData = ptdata.rawdata;
+                PTData(end,:) = [];
+                validTime = (PTData(:,end)-PTData(1,end))*10^-6; % in sec
+                timeAfterRF = PTData(:,end-1);
+                PTData(:,end-1:end) = [];
+                dt = 500*10^-6; % in sec
+                time = (0:dt:max(validTime))';
+
+                if rem(length(time),2)
+                    time(end) = [];
+                end
+
+                logging.info("Total scan time: %.2f sec.",max(validTime))
+
+                interpData = interp1(validTime, PTData,time,'pchip');
+                timeAfterRF = interp1(validTime, timeAfterRF,time,'pchip');
+                filtData = zeros(size(interpData));
+                for i=1:size(interpData,2)
+                    filtData(:,i) = lanczosfilter(interpData(:,i), dt, 0.5*(1/dt/param.dsRate));
+                end
+                dsData = downsample(filtData(:,1:2:end) + filtData(:,2:2:end)*1i,param.dsRate);
+                rovirData = dsData*param.V;
+                ptdata.data = cat(2,real(rovirData),imag(rovirData)) * diag(param.cor);
+                ptdata.data(1,:) = [];
+                ptdata.time = downsample(time,param.dsRate);
+                ptdata.time(1,:) = [];
+
+                [~, pk] = findpeaks(timeAfterRF,"MinPeakHeight", 0.05*max(timeAfterRF));
+                param.pk = [1; round(pk/param.dsRate)];
+
+                ptdata.param = param;
+
+                filename = sprintf("%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
+                if ispc
+                    save(fullfile(pwd,'output',filename),'imdata', 'ptdata');
+                elseif isunix
+                    save(fullfile('/tmp/share/prompt',filename),'imdata', 'ptdata');
+                end
+
+                % Run testing
+                logging.info("Testing network...")
+                param = testNetwork(imdata, ptdata, net);
+
+                data = uint16(255 - rgb2gray(imread(param.figName{1})))';
+                image{1} = obj.pack_image(data, info.head, info.attribute_string);
+
+                data = uint16(255 - rgb2gray(imread(param.figName{2})))';
+                image{2} = obj.pack_image(data, info.head, info.attribute_string);
+            end
+        end     % end of test_network()
 
         %% RUN_PREDICT
         function shiftvector = run_predict(obj, group, metadata, logging)
@@ -233,7 +372,7 @@ classdef prompt < handle
             if ispc
                 trainlist = dir(fullfile(pwd,'output',filename));
             elseif isunix
-                trainlist = dir(fullfile('/tmp/share',filename));
+                trainlist = dir(fullfile('/tmp/share/prompt',filename));
             end
 
             if isempty(trainlist) || ~contains([trainlist.name],'train', 'IgnoreCase', true)

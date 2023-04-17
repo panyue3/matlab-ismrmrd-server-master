@@ -3,14 +3,13 @@ function [respPT, respTime, param] = processPT(PTData, logging)
 %% Define parameters
 param.dsRate = 400;
 param.numPT = 2000/param.dsRate; % number of PT per second
-param.numVCha = 1;
+param.numVCha = 4;
 
 %% Pre-processing PT data
 PTData(end,:) = [];
 validTime = (PTData(:,end)-PTData(1,end))*10^-6; % in sec
 timeAfterRF = PTData(:,end-1);
 PTData(:,end-1:end) = [];
-df = diff(timeAfterRF);
 dt = 500*10^-6; % in sec
 time = (0:dt:max(validTime))';
 
@@ -18,12 +17,15 @@ if rem(length(time),2)
     time(end) = [];
 end
 
-logging.info("Total scan time: %.2f sec.",max(validTime))
+if nargin == 2
+    logging.info("Total scan time: %.2f sec.",max(validTime))
+end
 
-validData = interp1(validTime, PTData,time,'pchip');
-filtData = zeros(size(validData));
-for i=1:size(validData,2)
-    filtData(:,i) = lanczosfilter(validData(:,i), dt, 0.5*(1/dt/param.dsRate));
+interpData = interp1(validTime, PTData,time,'pchip');
+timeAfterRF = interp1(validTime, timeAfterRF,time,'pchip');
+filtData = zeros(size(interpData));
+for i=1:size(interpData,2)
+    filtData(:,i) = lanczosfilter(interpData(:,i), dt, 0.5*(1/dt/param.dsRate));
 end
 dsData = downsample(filtData(:,1:2:end) + filtData(:,2:2:end)*1i,param.dsRate);
 respTime = downsample(time,param.dsRate);
@@ -54,14 +56,12 @@ cInt = cov(Int);
 param.V = V(:,vIdx(1:param.numVCha));
 
 rovirData = dsData*param.V;
-rovirData = cat(2,real(rovirData),imag(rovirData));
-
-param.M = mean(rovirData);
-param.SD = std(rovirData);
-
-respPT = (rovirData - param.M) ./ param.SD;
+respPT = cat(2,real(rovirData),imag(rovirData));
 respPT(1,:) = [];
 respTime(1,:) = [];
+
+param.M = mean(respPT);
+param.SD = std(respPT);
 
 % find cardiac trigger
 [~, pk] = findpeaks(timeAfterRF,"MinPeakHeight", 0.05*max(timeAfterRF));
