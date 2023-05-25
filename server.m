@@ -71,6 +71,9 @@ classdef server < handle
                 if strcmpi(config, "prompt")
                     obj.log.info("Starting prompt processing based on config")
                     recon = prompt;
+                elseif strcmpi(config, "getpmu")
+                    obj.log.info("Starting invertcontrast processing based on config")
+                    recon = getpmu;
                 elseif strcmpi(config, "invertcontrast")
                     obj.log.info("Starting invertcontrast processing based on config")
                     recon = invertcontrast;

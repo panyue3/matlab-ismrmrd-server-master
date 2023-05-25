@@ -1,4 +1,4 @@
-function [imshift, isoutlier] = calculateImageShift(group, metadata, logging)
+function [imshift, isoutlier] = calculateImageShift(group, metadata, logging, ref)
 
 % Set MOCO parameters
 moco = 1; % MOCO method: 1 - Siemens, 2 - Demon
@@ -13,6 +13,8 @@ Options.MaxRef = 5;
 Options.Verbose = 0;
 
 % Extract image data
+tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
+filename = sprintf("%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
 nOri = max(cell2mat(cellfun(@(x) x.head.slice, group, 'UniformOutput', false))) + 1;
 nRep = max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1;
 szPix = single(group{1}.head.field_of_view(1:2)) ./ single(group{1}.head.matrix_size(1:2));
@@ -22,10 +24,19 @@ try
     data = cat(3, cData{:});
 catch
     for iOri = 2:nOri
-        if sum(size(cData{1}) ~= size(cData{iOri}))
-            isFlip(1) = true;
-            for ii = 1:nOri:numel(cData)
-                cData{ii} = transpose(cData{ii});
+        if isFlip(1) ~=true 
+            if sum(size(cData{1}) ~= size(cData{iOri}))
+                isFlip(1) = true;
+                for ii = 1:nOri:numel(cData)
+                    cData{ii} = transpose(cData{ii});
+                end
+            end
+        else
+            if sum(size(cData{1}) ~= size(cData{iOri}))
+                isFlip(iOri) = true;
+                for ii = iOri:nOri:numel(cData)
+                    cData{ii} = transpose(cData{ii});
+                end
             end
         end
     end
@@ -41,10 +52,8 @@ imAll = nan([size(data,[1 2]), nRep, size(data,3)/nRep]);
 for iOri = 1:nOri
     imAll(:,:,:,iOri) = data(:,:,cell2mat(cellfun(@(x) x.head.slice, group, 'UniformOutput', false))==iOri-1);
 end
-imAll = permute(imAll, [2, 1, 3, 4]);
 
-if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
-    ref = load('Ref.mat');
+if nargin > 3   
     if all(isFlip == ref.isFlip)
         try
             imAll = cat(3, ref.refIma, imAll);
@@ -59,29 +68,16 @@ end
 
 % Run MOCO
 rectSer = centerCropWindow2d(size(imAll,[1 2]),round(size(imAll,[1 2])/3));
-imshift = nan(nRep,3);
-nmse = nan(nRep,nOri);
+imDisp = nan(nRep,3,nOri);
+% nmse = nan(nRep,nOri);
+ssimval = nan(nRep,nOri);
 isoutlier = false(nRep,1);
 for iOri = 1:nOri
     % +++ Find image orientation +++
-    [readphaseDir, readphaseOri] = max(abs([group{iOri}.head.read_dir; group{iOri}.head.phase_dir]),[],2);
-    if sum(readphaseDir) ~= 2
-        logging.warn("Images acquired are not in true sagital, coronal, or axial plane.")
-    end
-    switch sum(readphaseOri)
-        case 3
-            imOri = [1 2];
-            imDir = [1 1];
-        case 4
-            imOri = [1 3];
-            imDir = [1 -1];
-        case 5
-            imOri = [2 3];
-            imDir = [1 -1];
-    end
+    meta = ismrmrd.Meta.deserialize(group{iOri}.attribute_string);
+    rotMatrix = [meta.ImageColumnDir; meta.ImageRowDir];
     if isFlip(iOri)
-        imOri = flip(imOri);
-        imDir = flip(imDir);
+        rotMatrix = flip(rotMatrix);
     end
     % === Find image orientation ===
 
@@ -89,53 +85,53 @@ for iOri = 1:nOri
     BSer = imAll(:,:,:,iOri);
 
     if iOri ==1
-        if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true) && nRep ==51
+        if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true) && nRep ~= (max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1)
             idx = 1;
         elseif nRep > 10
-            if  imOri(1) == 3
+            [~, zOri] = max(abs(rotMatrix(:,3)));
+            if  zOri == 1
                 switch moco
                     case 1
-                        [~,Dx] = mocoDisp(BSer(:,:,2:11), 5, param.mocoReg);
-                        parfor ii = 1:10
+                        [~,Dx] = mocoDisp(BSer(:,:,2:12), 5, param.mocoReg);
+                        parfor ii = 1:11
                             Dx_crop(:,:,ii) = imcrop(Dx(:,:,ii),rectSer);
                         end
                     case 2
-                        Dx_crop = zeros([round(size(imAll,[1 2])/3),10]);
-                        parfor ii = 1:10
+                        Dx_crop = zeros([round(size(imAll,[1 2])/3),11]);
+                        parfor ii = 1:11
                             [~, ~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
                             Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
                         end
                 end
-
-                [~, idxMax] = max(squeeze(mean(Dx_crop, [1,2]))*imDir(1));
-                [~, idxMin] = min(squeeze(mean(Dx_crop, [1,2]))*imDir(1));
-                idx = round(mean([idxMax, idxMin])) + double(idxMax>idxMin);
             else
                 switch moco
                     case 1
-                        [Dx,~] = mocoDisp(BSer(:,:,2:11), 5, param.mocoReg);
-                        parfor ii = 1:10
+                        [Dx,~] = mocoDisp(BSer(:,:,2:12), 5, param.mocoReg);
+                        parfor ii = 1:11
                             Dx_crop(:,:,ii) = imcrop(Dx(:,:,ii),rectSer);
                         end
                     case 2
-                        Dx_crop = zeros([round(size(BSer,[1 2])/3),10]);
-                        parfor ii = 1:10
+                        Dx_crop = zeros([round(size(imAll,[1 2])/3),11]);
+                        parfor ii = 1:11
                             [~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
                             Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
                         end
                 end
-
-                [~, idxMax] = max(squeeze(mean(Dx_crop, [1,2]))*imDir(2));
-                [~, idxMin] = min(squeeze(mean(Dx_crop, [1,2]))*imDir(2));
-                idx = round(mean([idxMax, idxMin])) + double(idxMax>idxMin);
             end
+
+            valMed= median(squeeze(mean(Dx_crop, [1,2])));
+            idx = find(squeeze(mean(Dx_crop, [1,2])) == valMed,1) + 1;
         else
             idx = round(nRep/2);
         end
 
         if contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
             refIma = imAll(:,:,idx,:);
-            save('Ref.mat', 'refIma','isFlip')
+            if ispc
+                save(fullfile(pwd,'output',filename),'refIma','isFlip');
+            elseif isunix
+                save(fullfile('/tmp/share/prompt',filename),'refIma','isFlip');
+            end
         end
     end
     % === Find end respiratory frame by MOCO first 10 frame ===
@@ -152,10 +148,11 @@ for iOri = 1:nOri
             parfor iRep = 1:nRep
                 Dx_Ser_crop(:,:,iRep) = imcrop(Dx_Ser(:,:,iRep),rectSer);
                 Dy_Ser_crop(:,:,iRep) = imcrop(Dy_Ser(:,:,iRep),rectSer);
-
-                % Calculate NMSE
                 Ireg = imcrop(Am_Ser(:,:,iRep),rectSer);
-                nmse(iRep,iOri) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
+
+                % Calculate NMSE and SSIM
+%                 nmse(iRep,iOri) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
+                ssimval(iRep,iOri) =  ssim(Iref, Ireg)
             end
         case 2
             Dx_Ser_crop = nan([round(size(BSer,[1 2])/3),nRep]);
@@ -170,7 +167,8 @@ for iOri = 1:nOri
                 Ireg = imcrop(Ireg,rectSer);
 
                 % Calculate NMSE
-                nmse(iRep,iOri) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
+%                 nmse(iRep,iOri) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
+                ssimval(iRep,iOri) =  ssim(Iref, Ireg)
             end
     end
     % === MOCO all images use end respiratory frame as reference ===
@@ -178,67 +176,55 @@ for iOri = 1:nOri
     % +++ Save MOCOed images +++
     if ispc
         clear im
-        tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
-        filename = sprintf("%s.%s_%s_IMG_MOCO_Ori%i.gif",tmp{11}, tmp{end}, metadata.measurementInformation.protocolName, iOri);
+        figname = sprintf("%s.%s_%s_IMG_MOCO_Ori%i.gif",tmp{11}, tmp{end}, metadata.measurementInformation.protocolName, iOri);
         for iRep = 1:nRep
             im = uint8(Icomb(:,:,iRep)/max(Iref(:))*255);
 
             if iRep == 1
-                imwrite(im,fullfile(pwd,'output',filename), 'gif', 'Loopcount', inf);
+                imwrite(im,fullfile(pwd,'output',figname), 'gif', 'Loopcount', inf);
             else
-                imwrite(im,fullfile(pwd,'output',filename),'gif', 'DelayTime', 0.25, 'WriteMode','append');
+                imwrite(im,fullfile(pwd,'output',figname),'gif', 'DelayTime', 0.25, 'WriteMode','append');
             end
         end
     end
     % === Save MOCOed images ===
 
     % +++ Save outlier +++
-    thrd = max([mean(nmse(:,iOri),'omitnan') + 3*std(nmse(:,iOri),[],'omitnan') 2.5*quantile(nmse(:,iOri), 0.75)-1.5*quantile(nmse(:,iOri), 0.25)]);
-    isoutlier(nmse(:,iOri) > thrd) = true;
+    thrd = min([mean(ssimval(:,iOri),'omitnan') - 3*std(ssimval(:,iOri),[],'omitnan') 2.5*quantile(ssimval(:,iOri), 0.25)-1.5*quantile(ssimval(:,iOri), 0.75)]);
+    isoutlier(ssimval(:,iOri) < thrd) = true;
     % === Save outlier ===
 
-    % +++ Plot NMSE  +++
+    % +++ Plot SSIM  +++
     if ispc
-        nmse(1,iOri) = nan;
         fig = figure(1);
         subplot(double(nOri),1,double(iOri))
-        plot(nmse(:,iOri),'*')
-        if sum(nmse(:,iOri) > thrd)
+        plot(ssimval(:,iOri),'*')
+        if sum(ssimval(:,iOri) < thrd)
             hold on
             line([0 nRep],[thrd thrd],'Color','k','LineStyle','--')
             hold off
         end
-        title(sprintf('Ref frame %i, Mean NMSE x 1000: %0.2f',idx,mean(nmse(:,iOri),'omitnan')*1000))
+        title(sprintf('Ref frame %i, Mean SSIM: %0.2f',idx,mean(ssimval(:,iOri),'omitnan')))
     end
-    % === Plot NMSE ===
+    % === Plot SSIM ===
 
-    % +++ Save imshift +++
-    imDisp = [];
-    imDisp(:,1) = squeeze(mean(mean(Dy_Ser_crop,1),2))*szPix(1)*szPix(2);
-    imDisp(:,2) = squeeze(mean(mean(Dx_Ser_crop,1),2))*szPix(1)*szPix(2);
-    [~, iMin] = min(mean(nmse,'omitnan'),[],'omitnan');
-    if iOri == iMin
-        imshift(:,imOri) = imDisp .* imDir;
-    else
-        for ii = 1:width(imDisp)
-            if sum(isnan(imshift(:,imOri(ii))))
-                imshift(:,imOri(ii)) = imDisp(:,ii) .* imDir(ii);
-            end
-        end
-    end
-    % === Save imshift ===
+    imDisp(:,:,iOri) = [squeeze(mean(mean(Dy_Ser_crop,1),2))*szPix(1), squeeze(mean(mean(Dx_Ser_crop,1),2))*szPix(2)] * single(rotMatrix);
 
 end    % end of count Ori
 
-if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true) && nRep ==51
+[~, idx] = sort(mean(ssimval,'omitnan'),'descend');
+imshift = squeeze(imDisp(:,:,idx(1)));
+imshift(:,~imshift(end,:)) = squeeze(imDisp(:,~imshift(end,:),idx(2)));
+
+if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true) && nRep ~= (max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1)
     imshift(1,:) = [];
     isoutlier(1) = [];
 end
 
-% Save NMSE plot
+% Save SSIM plot
 if ispc
-    filename = sprintf("%s.%s_%s_NMSE.png", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
-    saveas(fig, fullfile(pwd,'output',filename))
+    figname = sprintf("%s.%s_%s_SSIM.png", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
+    saveas(fig, fullfile(pwd,'output',figname))
     close(fig)
 end
 

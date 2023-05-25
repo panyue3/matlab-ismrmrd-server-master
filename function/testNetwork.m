@@ -1,7 +1,7 @@
 function param = testNetwork(imdata, ptdata, net)
 
 param = ptdata.param;
-ptdata.data = (ptdata.data - param.M) ./ param.SD;
+% ptdata.data = (ptdata.data - param.M) ./ param.SD;
 numRep = size(imdata.shiftvec,1);
 % Pack PT and Disp data into NN input and output arrays
 InData = [];
@@ -14,7 +14,7 @@ OtData = imdata.shiftvec(nBeats+1:numRep,:);
 
 yData = predict(net,InData,'MiniBatchSize',1);
 eData = OtData - yData;
-nmse = sqrt(sum(eData.^2,'all') / sum(OtData.^2,'all'));
+err = 10 * log10(sum(eData.^2,'all') / sum(OtData.^2,'all'));
 
 ylimit = [min([OtData(:); yData(:); eData(:)]) max([OtData(:); yData(:); eData(:)])];
 fig = figure;
@@ -25,7 +25,7 @@ subplot(size(imdata.shiftvec,2),1,2); plot(nBeats+1:numRep,OtData(:,2),'k'); hol
 xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit);
 subplot(size(imdata.shiftvec,2),1,3); plot(nBeats+1:numRep,OtData(:,3),'k'); hold on; plot(nBeats+1:numRep,yData(:,3),'k--'); plot(nBeats+1:numRep,eData(:,3),'k:'); 
 xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit);
-sgtitle(sprintf('Test Err: %.2f', nmse))
+sgtitle(sprintf('Test Err: %.2f', err))
 hold off
 set(gcf,'Position', [0 0 1200 900])
 param.figName{1} = fullfile(pwd,'output','Test_Result.png');

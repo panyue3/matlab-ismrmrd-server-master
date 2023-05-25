@@ -126,17 +126,16 @@ classdef Meta
                     elseif strcmpi(values{iVal}, 'false')
                         values{iVal} = false;
                     end
-        
+
                     % Just numbers or negatives
-                    if all(((uint8(values{iVal}) >= uint8('0')) & (uint8(values{iVal}) <= uint8('9'))) | ...
-                                    (uint8(values{iVal}) == uint8('-')))
+                    if all(((uint8(values{iVal}) >= uint8('0')) & (uint8(values{iVal}) <= uint8('9'))) | (uint8(values{iVal}) == uint8('-')))
                         values{iVal} = int64(str2double(values{iVal}));
                     end
-        
+
                     % Floats may have decimals or exponents
-                    if all(((uint8(values{iVal}) >= uint8('0')) & (uint8(values{iVal}) <= uint8('9'))) | ...
-                                 ((uint8(values{iVal}) == uint8('-')) | (uint8(values{iVal}) == uint8('.')) | (uint8(values{iVal}) == uint8('e'))))
-                        if sum(uint8(values{iVal}) == uint8('.')) <= 1
+                    if all(((uint8(values{iVal}) >= uint8('0')) & (uint8(values{iVal}) <= uint8('9'))) | ((uint8(values{iVal}) == uint8('-')) | (uint8(values{iVal}) == uint8('.')) | (uint8(values{iVal}) == uint8('e'))))
+                        % UIDs are often numbers with multiple decimals and not valid numbers
+                        if (sum(uint8(values{iVal}) == uint8('.')) < 2)
                             values{iVal} = str2double(values{iVal});
                         end
                     end

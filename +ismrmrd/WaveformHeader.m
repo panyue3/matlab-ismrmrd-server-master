@@ -44,7 +44,7 @@ classdef WaveformHeader
                         obj = arg;
                     elseif isa(arg,'uint8')
                         % Byte array (e.g. from serialized data)
-                        deserialize(obj,arg);
+                        obj = deserialize(obj,arg);
                     else
                         % Unknown type
                         error('Unsupported constructor with input class %s', class(arg))
@@ -72,7 +72,7 @@ classdef WaveformHeader
         function obj = set_waveform_id(      obj, val),  if obj.ValidateSize(val, [1  1], 'waveform_id'),       obj.waveform_id       = uint16(val); end,  end
 
         % Convert from the byte array of the C-struct memory layout for an ISMRMRD WaveformHeader
-        function deserialize(obj, bytes)
+        function obj = deserialize(obj, bytes)
             if (numel(bytes) ~= 40)
                 error('Serialized WaveformHeader is %d bytes -- should be 40', numel(bytes))
             end

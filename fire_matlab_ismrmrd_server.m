@@ -1,5 +1,5 @@
 function fire_matlab_ismrmrd_server(varargin)
-    addpath('mex');
+%     addpath('mex');
     addpath(genpath('function'))
     setPlotDefault
     if(isOctave)
