@@ -1,4 +1,4 @@
-function [imshift, isoutlier] = calculateImageShift(group, metadata, logging, ref)
+function [imshift, refIma_crop] = calculateImageShift(group, metadata, logging, ref)
 
 % Set MOCO parameters
 moco = 1; % MOCO method: 1 - Siemens, 2 - Demon
@@ -71,7 +71,6 @@ rectSer = centerCropWindow2d(size(imAll,[1 2]),round(size(imAll,[1 2])/3));
 imDisp = nan(nRep,3,nOri);
 % nmse = nan(nRep,nOri);
 ssimval = nan(nRep,nOri);
-isoutlier = false(nRep,1);
 for iOri = 1:nOri
     % +++ Find image orientation +++
     meta = ismrmrd.Meta.deserialize(group{iOri}.attribute_string);
@@ -209,14 +208,14 @@ for iOri = 1:nOri
     % === Plot SSIM ===
 
     imDisp(:,:,iOri) = [squeeze(mean(mean(Dy_Ser_crop,1),2))*szPix(1), squeeze(mean(mean(Dx_Ser_crop,1),2))*szPix(2)] * single(rotMatrix);
-
+    refIma_crop(:,:,iOri) = Iref;
 end    % end of count Ori
 
 [~, idx] = sort(mean(ssimval,'omitnan'),'descend');
 imshift = squeeze(imDisp(:,:,idx(1)));
 imshift(:,~imshift(end,:)) = squeeze(imDisp(:,~imshift(end,:),idx(2)));
 
-if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true) && nRep ~= (max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1)
+if nRep ~= (max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1)
     imshift(1,:) = [];
     isoutlier(1) = [];
 end

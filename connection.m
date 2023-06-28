@@ -88,6 +88,8 @@ classdef connection < handle
                     out = read_waveform(obj);
                 case constants.MRD_MESSAGE_ISMRMRD_IMAGE
                     out = read_image(obj);
+                case constants.MRD_MESSAGE_ISMRMRD_FEEDBACK
+                    out = read_feedback(obj);
                 otherwise
                     out = unknown_message_identifier(obj, identifier);
             end
@@ -354,7 +356,7 @@ classdef connection < handle
             attrib_length = typecast(read(obj,constants.SIZEOF_MRD_MESSAGE_ATTRIB_LENGTH), 'uint64');
             obj.log.debug("   Reading in %d bytes of attributes", attrib_length)
             attribs = char(read(obj, attrib_length))';
-            obj.log.debug("   Attributes: %s", attribs)
+%             obj.log.debug("   Attributes: %s", attribs)
 
             obj.log.debug("   Image is size %d x %d x %d with %d channels of type %s", header.matrix_size(1), header.matrix_size(2), header.matrix_size(3), header.channels, ismrmrd.ImageHeader.getMrdDatatypeName(header.data_type))
             npixels = prod(uint64(header.matrix_size)) * uint64(header.channels);
@@ -416,6 +418,36 @@ classdef connection < handle
                 obj.dset.appendWaveform(waveform);
             end
         end
+
+    % ----- MRD_MESSAGE_ISMRMRD_FEEDBACK (1028) -----------------------------
+    % This message contains real-time feedback data.
+    % Message consists of:
+    %   ID               (   2 bytes, unsigned short)
+    %   Name length      (   4 bytes, uint32_t      )
+    %   Name             (  variable, char          )
+    %   Data length      (   4 bytes, uint32_t      )
+    %   Data             (  variable, char          )
+    % ----------------------------------------------------------------------
+    function obj = send_feedback(obj, name, data)
+        obj.log.info("--> Sending MRD_MESSAGE_FEEDBACK (1028)")
+
+        ID = typecast(uint16(constants.MRD_MESSAGE_ISMRMRD_FEEDBACK), 'uint8');
+        name_len = typecast(uint32(numel(name) + 1), 'uint8');
+        data_len = typecast(uint32(numel(data.serialize())), 'uint8');
+
+        write(obj, ID);
+        write(obj, name_len);
+        write(obj, uint8(cat(2, reshape(name, 1, []), 0)));
+        write(obj, data_len);
+        write(obj, data.serialize());        
+    end
+
+    function [name, data] = read_feedback(obj)
+        %obj.log.info("<-- Received MRD_MESSAGE_FEEDBACK (1028)")
+        obj.log.info("==== read_feedback is currently not available ===")
+        name = '';
+        data = [];
+    end
 
     end
 end

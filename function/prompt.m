@@ -3,6 +3,10 @@ classdef prompt < handle
         %% PROCESS
         function process(obj, connection, config, metadata, logging)
             logging.info('Config: \n%s', config);
+            if ~any(strcmp({metadata.userParameters.userParameterLong.name}, 'PilotTone')) || ~metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PilotTone'))).value
+                logging.error("Pilot Tone was not turned on.")
+            end
+
             if isempty(gcp('nocreate'))
                 parpool
             end
@@ -15,7 +19,8 @@ classdef prompt < handle
                 mkdir('/tmp/share/prompt')
             end
 
-            runTraining = contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true);
+            runTraining = metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTcalibrate'))).value; %contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true);
+            sendRTFB = metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTShift'))).value;
             if ~runTraining
                 predshift = [];
 
@@ -68,7 +73,8 @@ classdef prompt < handle
 
             % Continuously parse incoming data parsed from MRD messages
             imgGroup = cell(1,0); % ismrmrd.Image;
-            wavGroup = cell(1,0); % ismrmrd.Waveform;
+            ptGroup = cell(1,0); % ismrmrd.Waveform;
+            ecgGroup = cell(1,0); % ismrmrd.Waveform;
             try
                 while true
                     item = next(connection);
@@ -84,24 +90,47 @@ classdef prompt < handle
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
                         if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
-                            imgGroup{end+1} = item;
+                            if ~sendRTFB
+                                imgGroup{end+1} = item;
+                            end
+                            if ~exist('info','var')
+                                % Save header info for image generation
+                                info.head = item.head;
+                                info.attribute_string = item.attribute_string;
+                            end
                         end
 
                     % ----------------------------------------------------------
                     % Waveform data messages
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Waveform') 
-                        if item.head.waveform_id == 16 || item.head.waveform_id == 0
-                            wavGroup{end+1} = item;
-                            if ~ runTraining && item.head.waveform_id == 0 && sum(item.data(:,5))
-                                tic
-                                shiftvector = obj.run_predict(wavGroup, net, param, metadata, logging);
-                                elapsedTime = toc;
-                                logging.debug("Predicted shift dX: %.2f, dY: %.2f, dZ: %.2f. -- time used: %f ", shiftvector(1), shiftvector(2), shiftvector(3), elapsedTime)
-                                predshift(end+1,:) = shiftvector;
+                        if item.head.waveform_id == 16
+                            ptGroup{end+1} = item;
+                        elseif item.head.waveform_id == 0
+                            ecgGroup{end+1} = item;                            
+                            if ~ runTraining && sum(item.data(:,5))
+                                if double(ecgGroup{end}.head.time_stamp - ptGroup{1}.head.time_stamp)*2.5*10^-3 > param.nSecs
+                                    nPTclip = 11*200;
+                                    nECGclip = 11*10;
+                                    param.startTime = ptGroup{1}.head.time_stamp;   
+                                    tic
+                                    if numel(ptGroup) > nPTclip && numel(ecgGroup) > nECGclip
+                                        shiftvector = obj.run_predict(ptGroup(end-nPTclip+1:end), ecgGroup(end-nECGclip+1:end), net, param, metadata, logging);
+                                    else
+                                        shiftvector = obj.run_predict(ptGroup, ecgGroup, net, param, metadata, logging);
+                                    end
+                                    elapsedTime = toc;
+                                    predshift(end+1,:) = shiftvector;
+                                    feedbackData = PTshiftFBData(shiftvector, logging);
+                                    logging.debug("Predicted shift dX: %.2f, dY: %.2f, dZ: %.2f -- Time used: %f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), elapsedTime)
 
-                             % ++++++++++ SEND SHIFTVECTOR TO SEQUENCE ++++++++++ %
-                             % ++++++++++ SEND SHIFTVECTOR TO SEQUENCE ++++++++++ %
+                                    % Send shift vector through Feedback
+                                    if sendRTFB && ~any(isnan(shiftvector))
+                                        connection.send_feedback('PTShift', feedbackData);
+                                    end
+                                else
+                                    predshift(end+1,:) = nan(1,3);
+                                end
                             end
                         end
 
@@ -116,22 +145,21 @@ classdef prompt < handle
                 logging.error(sprintf('%s\nError in %s (%s) (line %d)', ME.message, ME.stack(1).('name'), ME.stack(1).('file'), ME.stack(1).('line')));
             end
 
-            % Save header info for image generation
-            info.head = imgGroup{1}.head;
-            info.attribute_string = imgGroup{1}.attribute_string;
-
             % ----------------------------------------------------------
             % Image data group
             % ----------------------------------------------------------
             if ~isempty(imgGroup)
-                logging.info("Processing a group of images (untriggered)")
+                logging.info("Processing a group of images (untriggered)")           
                 if runTraining
                     [image, imdata] = obj.process_images(imgGroup, metadata, logging);
-                else
+                    logging.debug("Sending image to client");
+                    connection.send_image(image);
+                elseif contains(metadata.measurementInformation.protocolName,'test', 'IgnoreCase', true)
                     [image, imdata]  = obj.process_images(imgGroup, metadata, logging, ref);
-                end                           
-                logging.debug("Sending image to client");
-                connection.send_image(image);
+                    logging.debug("Sending image to client");
+                    connection.send_image(image);
+                end
+
                 imgGroup = cell(1,0);
             else
                 logging.warn("Image was not received.")
@@ -140,10 +168,10 @@ classdef prompt < handle
             % ----------------------------------------------------------
             % Waveform data group
             % ----------------------------------------------------------
-            if ~isempty(wavGroup)
+            if ~isempty(ptGroup) && ~isempty(ecgGroup)
                 if runTraining
                     logging.info("Processing a group of PT data (untriggered)")
-                    [image, ptdata] = obj.process_waveform(wavGroup, info, metadata, logging);
+                    [image, ptdata] = obj.process_waveform(ptGroup, ecgGroup, info, metadata, logging);
                     logging.debug("Sending image to client");
                     connection.send_image(image);
                 end
@@ -164,16 +192,25 @@ classdef prompt < handle
                     logging.error("Processed PT or image shift data not found")
                 end
             else
-                if exist('imdata','var') && exist('predshift','var')
-                    image = obj.plot_predict(imdata.shiftvec, predshift, info, metadata, logging);
+                if exist('predshift','var')
+                    if ~sendRTFB && exist('imdata','var')
+                        image = obj.plot_predict(imdata.shiftvec, predshift, info, metadata, logging);
+                    else
+                        image = obj.plot_predict([], predshift, info, metadata, logging);
+                    end
                     logging.debug("Sending image to client");
                     connection.send_image(image);
                 else
-                    logging.error("Image shift data not found")
+                    logging.error("Predicted shift data not found")
                 end
             end
 
             connection.send_close();
+            % Reset gpu device
+            if gpuDeviceCount
+                gpuDevice([]);
+            end
+
             return
         end  % end of process()
 
@@ -181,24 +218,39 @@ classdef prompt < handle
         function [image, imdata] = process_images(obj, group, metadata, logging, ref)
 
             % Calculate image shift
-            if contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
-                [imdata.shiftvec, imdata.isoutlier]  = calculateImageShift(group, metadata, logging);
+            if nargin < 5
+                [imdata.shiftvec, ref_crop]  = calculateImageShift(group, metadata, logging);
             else
-                [imdata.shiftvec, imdata.isoutlier]  = calculateImageShift(group, metadata, logging, ref);
+                [imdata.shiftvec, ref_crop]  = calculateImageShift(group, metadata, logging, ref);
+            end
+
+            % Pack cropped reference images
+            for ii = 1:size(ref_crop,3)
+                ima = ismrmrd.Image(single(ref_crop(:,:,ii)));
+
+                % Copy original image header, but keep the new data_type
+                data_type = ima.head.data_type;
+                ima.head = group{ii}.head;
+                ima.head.data_type = data_type;
+                ima.head.field_of_view = [group{ii}.head.field_of_view(1:2)./3, group{ii}.head.field_of_view(3)];
+                ima.head.matrix_size = size(ref_crop(:,:,ii), [1 2 3]);
+
+                % Add to ImageProcessingHistory
+                meta = ismrmrd.Meta.deserialize(group{ii}.attribute_string);
+                meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'PROMPT');
+                ima = ima.set_attribute_string(ismrmrd.Meta.serialize(meta));
+                image{ii} = ima;
             end
 
             % Save figure to output folder
             fig = figure;
             hold on
             plot(imdata.shiftvec(:,1),'k:'); plot(imdata.shiftvec(:,2),'k--'); plot(imdata.shiftvec(:,3),'k');
-            if ~isempty(find(imdata.isoutlier, 1))
-                xline(find(imdata.isoutlier),'LineWidth',2,'Color',[0.7 0.7 0.7]); 
-            end
             xlim([0 size(imdata.shiftvec,1)]);
             ylabel('Displacement (mm)'); title('Image Disp');
             legend('dX','dY','dZ','Location','southoutside','NumColumns',3);
             hold off
-            if contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
+            if nargin < 5
                 figname = fullfile(pwd,'output','Train_Disp.png');
             else
                 figname = fullfile(pwd,'output','Test_Disp.png');
@@ -207,17 +259,14 @@ classdef prompt < handle
             close(fig)
 
             data = uint16(255 - rgb2gray(imread(figname)))';
-            image = obj.pack_image(data, group{1});
+            image{end+1} = obj.pack_image(data, group{1});
 
         end     % end of process_images()
 
         %% PROCESS_WAVEFORM
-        function [image, ptdata] = process_waveform(obj, group, info, metadata, logging)
+        function [image, ptdata] = process_waveform(obj, ptGroup, ecgGroup, info, metadata, logging)
 
-            % Separate waveforms into PT and ECG
-            waveID = cellfun(@(x) x.head.waveform_id, group);
-            ptGroup  = group(waveID == 16);
-            ecgGroup = group(waveID == 0);
+            % Check all pt samples have same number of channels
             ncha = cellfun(@(x) x.head.channels, ptGroup);
             ptGroup = ptGroup(ncha == mode(ncha));
 
@@ -226,11 +275,10 @@ classdef prompt < handle
             ptdata.rawdata = reshape(typecast(ptdata.rawdata(:),'single'),[],mode(ncha)-1);
             ptdata.rawdata = ptdata.rawdata(1:2:end,:) + ptdata.rawdata(2:2:end,:)*1i;
             ptdata.isvalid = logical(cell2mat(cellfun(@(x) x.data(1:2:end,end), ptGroup, 'UniformOutput', false)'));
-            ptdata.rawtime = (double(ptGroup{1}.head.time_stamp):0.2:double(ptGroup{end}.head.time_stamp)+1.8)'*2.5*10^-3;
+            ptdata.rawtime = (0:numel(ptdata.isvalid)-1)'*500*10^-6;
             % Extract ecg data
             ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
-            ecgdata.time =  double(ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+39)'*2.5*10^-3 - ptdata.rawtime(1);
-            ptdata.rawtime = ptdata.rawtime - ptdata.rawtime(1);
+            ecgdata.time =  double((ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+uint32(ecgGroup{end}.head.number_of_samples)) - ptGroup{1}.head.time_stamp)'*2.5*10^-3;
 
             % Process PT
             [ptdata.data, ptdata.time, ptdata.param] = processPT(ptdata, logging);
@@ -240,11 +288,14 @@ classdef prompt < handle
 
             % Save figure to output folder
             fig = figure;
-            hold on
-            plot(ptdata.time, ptdata.data,'k')
-            xlim([0 max(ptdata.time)]);
-            title('PT');
-            hold off
+            for i=1:min([ptdata.param.numVCha 4])
+                nexttile; hold on;
+                plot(ptdata.time, ptdata.data(:,i)-mean(ptdata.data(:,i)),'k')
+                plot(ptdata.time, ptdata.data(:,i+ptdata.param.numVCha)-mean(ptdata.data(:,i+ptdata.param.numVCha)),'k--')
+                title(sprintf('PT channel %i',i)); xlim([0 max(ptdata.time)]); hold off
+            end
+            lgd = legend('Real','Imag'); lgd.Layout.Tile = 'south'; lgd.NumColumns = 2;
+            set(gcf,'Position', [0 0 1200 900])
             figname = fullfile(pwd,'output','Train_PT.png');
             saveas(fig, figname)
             close(fig)
@@ -269,7 +320,6 @@ classdef prompt < handle
             % Run training
             ptdata.param.cor = sign(corr(imdata.shiftvec(:,3),ptdata.data(ptdata.param.pk,:)));
             ptdata.data = ptdata.data * diag(ptdata.param.cor);
-            ptdata.param.M = ptdata.param.M .* ptdata.param.cor;
 
             logging.info("Training network...")
             [net, param] = runTraining(imdata, ptdata, logging);
@@ -278,63 +328,40 @@ classdef prompt < handle
             param.coils = param.coils(idx);
             save(filename,'net', 'param', '-append');
 
-            data = uint16(255 - rgb2gray(imread(param.figName{1})))';
-            image{1} = obj.pack_image(data, info);
-
-            data = uint16(255 - rgb2gray(imread(param.figName{2})))';
-            image{2} = obj.pack_image(data, info);
+            for ii = 1:numel(param.figName)
+                data = uint16(255 - rgb2gray(imread(param.figName{ii})))';
+                image{ii} = obj.pack_image(data, info);
+            end
 
         end     % end of train_network()
 
         %% RUN_PREDICT
-        function shiftvector = run_predict(obj, group, net, param, metadata, logging)
+        function shiftvector = run_predict(obj, ptGroup, ecgGroup, net, param, metadata, logging)
 
-            % Separate waveforms into PT and ECG
-            waveID = cellfun(@(x) x.head.waveform_id, group);
-            ptGroup  = group(waveID == 16);
-            ecgGroup = group(waveID == 0);
+            % Check all pt samples have same number of channels
             ncha = cellfun(@(x) x.head.channels, ptGroup);
             ptGroup = ptGroup(ncha == mode(ncha));
+            
+            % Extract pt data
+            ptdata.rawdata = cell2mat(cellfun(@(x) x.data(:,1:end-1), ptGroup, 'UniformOutput', false)');
+            ptdata.rawdata = reshape(typecast(ptdata.rawdata(:),'single'),[],mode(ncha)-1);
+            ptdata.rawdata = ptdata.rawdata(1:2:end,:) + ptdata.rawdata(2:2:end,:)*1i;
+            ptdata.isvalid = logical(cell2mat(cellfun(@(x) x.data(1:2:end,end), ptGroup, 'UniformOutput', false)'));
+            ptdata.rawtime = (0:numel(ptdata.isvalid)-1)'*500*10^-6;
+            % Extract ecg data
+            ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
+            ecgdata.time =  double((ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+uint32(ecgGroup{end}.head.number_of_samples)) - param.startTime)'*2.5*10^-3;
 
-            if double(ecgGroup{end}.head.time_stamp - ptGroup{1}.head.time_stamp)*2.5*10^-3 > param.nSecs
-                % Extract pt data
-                nPTclip = 10*200;
-                if numel(ptGroup) > nPTclip
-                    ptdata.rawdata = cell2mat(cellfun(@(x) x.data(:,1:end-1), ptGroup(end-nPTclip+1:end), 'UniformOutput', false)');
-                    ptdata.rawdata = reshape(typecast(ptdata.rawdata(:),'single'),[],mode(ncha)-1);
-                    ptdata.rawdata = ptdata.rawdata(1:2:end,:) + ptdata.rawdata(2:2:end,:)*1i;
-                    ptdata.isvalid = logical(cell2mat(cellfun(@(x) x.data(1:2:end,end), ptGroup(end-nPTclip+1:end), 'UniformOutput', false)'));
-                    ptdata.rawtime = (double(ptGroup{end-nPTclip+1}.head.time_stamp):0.2:double(ptGroup{end}.head.time_stamp)+1.8)'*2.5*10^-3;
-                    % Extract ecg data
-                    ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
-                    ecgdata.time =  double((ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+39)  - ptGroup{1}.head.time_stamp)'*2.5*10^-3;
-                    ptdata.rawtime = ptdata.rawtime - double(ptGroup{1}.head.time_stamp)*2.5*10^-3;
-                    ecgdata.trigger(ecgdata.time<min(ptdata.rawtime)) = [];
-                    ecgdata.time(ecgdata.time<min(ptdata.rawtime)) = [];
-                else
-                    ptdata.rawdata = cell2mat(cellfun(@(x) x.data(:,1:end-1), ptGroup, 'UniformOutput', false)');
-                    ptdata.rawdata = reshape(typecast(ptdata.rawdata(:),'single'),[],mode(ncha)-1);
-                    ptdata.rawdata = ptdata.rawdata(1:2:end,:) + ptdata.rawdata(2:2:end,:)*1i;
-                    ptdata.isvalid = logical(cell2mat(cellfun(@(x) x.data(1:2:end,end), ptGroup, 'UniformOutput', false)'));
-                    ptdata.rawtime = (double(ptGroup{1}.head.time_stamp):0.2:double(ptGroup{end}.head.time_stamp)+1.8)'*2.5*10^-3;
-                    % Extract ecg data
-                    ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
-                    ecgdata.time =  double(ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+39)'*2.5*10^-3 - ptdata.rawtime(1);
-                    ptdata.rawtime = ptdata.rawtime - ptdata.rawtime(1);
-                end
-    
-                % Process PT
-                [ptdata.data, ptdata.time] = processPT(ptdata, logging, param);
-    
-                % Find trigger indices
-                [~, param.pk] = min(abs(ptdata.time - ecgdata.time(ecgdata.trigger).'), [], 1);
+            % Process PT
+            [ptdata.data, ptdata.time] = processPT(ptdata, logging, param);
 
-                % Pack PT into NN input array
-                InData = ptdata.data(param.pk(end)-param.numPT*param.nSecs+1:param.pk(end),:)';
-                shiftvector = predict(net,InData,'MiniBatchSize',1);
-            else
-                shiftvector = nan(1,3);
-            end
+            % Find trigger indices
+            [~, param.pk] = min(abs(ptdata.time - ecgdata.time(ecgdata.trigger).'), [], 1);
+
+            % Pack PT into NN input array
+            InData = ptdata.data(param.pk(end)-param.numPT*param.nSecs+1:param.pk(end),:)';
+            InData = (InData - mean(InData,2)) ./ std(InData,[],2);
+            shiftvector = predict(net,InData,'MiniBatchSize',1);
 
         end     % end of run_predict()
 
@@ -342,51 +369,40 @@ classdef prompt < handle
         function image = plot_predict(obj, OtData, yData, info, metadata, logging)
             
             % Check matrix size 
-            if any(size(OtData) ~= size(yData))
-                logging.error('Ground truth and prediction matrices size do not match')
+            if ~isempty(OtData)
+                if any(size(OtData) ~= size(yData))
+                    logging.error('Ground truth and prediction matrices size do not match')
+                end
+    
+                OtData(1:sum(isnan(yData(:,1))),:) = nan;
+                figName = genPlots(OtData, yData);
+
+                for ii = 1:numel(figName)
+                    data = uint16(255 - rgb2gray(imread(figName{ii})))';
+                    image{ii} = obj.pack_image(data, info);
+                end
+            else
+                ylimit = [min(yData(:)) max(yData(:))];
+                fig = figure;
+                subplot(size(yData,2),1,1); plot(yData(:,1),'k');
+                xlabel('Time (s)'); ylabel('dX (mm)'); grid('on'); ylim(ylimit);
+                legend('prediction','Location','northwest'); legend('boxoff')
+                subplot(size(yData,2),1,2); plot(yData(:,2),'k');
+                xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit);
+                subplot(size(yData,2),1,3); plot(yData(:,3),'k');
+                xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit);
+                sgtitle('Predited Shift')
+                hold off
+                set(gcf,'Position', [0 0 1200 900])
+                figName = fullfile(pwd,'output','Predicted_Shift.png');
+                saveas(fig, figName)
+                close(fig)
+                data = uint16(255 - rgb2gray(imread(figName)))';
+                image = obj.pack_image(data, info);
             end
 
-            nBeats = sum(isnan(yData(:,1)));
-            eData = OtData - yData;
-            err = 10 * log10(sum(eData.^2,'all','omitnan') / sum(OtData(nBeats+1:end,:).^2,'all'));
-
-            ylimit = [min([OtData(:); yData(:); eData(:)]) max([OtData(:); yData(:); eData(:)])];
-            fig = figure;
-            subplot(size(OtData,2),1,1); plot(OtData(:,1),'k'); hold on; plot(yData(:,1),'k--'); plot(eData(:,1),'k:');
-            xlabel('Time (s)'); ylabel('dX (mm)'); grid('on'); ylim(ylimit);
-            legend('data', 'prediction', 'error','Location','northwest'); legend('boxoff')
-            subplot(size(OtData,2),1,2); plot(OtData(:,2),'k'); hold on; plot(yData(:,2),'k--'); plot(eData(:,2),'k:');
-            xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit);
-            subplot(size(OtData,2),1,3); plot(OtData(:,3),'k'); hold on; plot(yData(:,3),'k--'); plot(eData(:,3),'k:');
-            xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit);
-            sgtitle(sprintf('Test Err: %.2f', err))
-            hold off
-            set(gcf,'Position', [0 0 1200 900])
-            figName = fullfile(pwd,'output','Test_Result.png');
-            saveas(fig, figName)
-            close(fig)
-            data = uint16(255 - rgb2gray(imread(figName)))';
-            image{1} = obj.pack_image(data, info);
-
-            fig = figure;
-            hold on
-            scatter(yData(:,1),OtData(:,1),'k+');
-            scatter(yData(:,2),OtData(:,2),'kx');
-            scatter(yData(:,3),OtData(:,3),'ko');
-            xlabel("Predicted Shift")
-            ylabel("Actual Shift")
-            m = min(OtData,[],'all');
-            M=max(OtData,[],'all');
-            xlim([m M])
-            ylim([m M])
-            plot([m M], [m M], "r--")
-            legend('dX','dY','dZ','','Location','Best')
-            figName = fullfile(pwd,'output','Test_Predit.vs.Actual.png');
-            saveas(fig, figName)
-            close(fig)
-            data = uint16(255 - rgb2gray(imread(figName)))';
-            image{2} = obj.pack_image(data, info);
         end     % end of plot_predict()
+
         %% PACK_IMAGE
         function image = pack_image(obj, data, info)
 

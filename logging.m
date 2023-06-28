@@ -10,9 +10,9 @@ classdef logging < handle
     methods (Static)
         function obj = createLog(filename)
             persistent thisObj;
-            if isempty(thisObj) || ~isvalid(thisObj)
+%             if isempty(thisObj) || ~isvalid(thisObj)
                 thisObj = logging(filename);
-            end
+%             end
             obj = thisObj;
         end
     end

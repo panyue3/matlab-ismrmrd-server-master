@@ -18,6 +18,9 @@ function fire_matlab_ismrmrd_server(varargin)
         if ispc
             logfile = '';
         else
+            if ~exist('/tmp/share/prompt', 'dir')
+                mkdir('/tmp/share/prompt')
+            end
             logfile = sprintf('/tmp/share/prompt/logfile_%s.log', datestr(now,'yyyy-mm-dd-HH-MM-SS'));
         end
     else

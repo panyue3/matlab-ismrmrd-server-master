@@ -77,16 +77,9 @@ if runTraining
     respPT = cat(2,real(rovirData),imag(rovirData));
     respPT(1,:) = [];
     respTime(1,:) = [];
-
-    param.M = mean(respPT);
-    param.SD = std(respPT);
 else
     rovirData = dsData*param.V;
     respPT = cat(2,real(rovirData),imag(rovirData)) * diag(param.cor);
-    respPT(1,:) = [];
-    respTime(1,:) = [];
 end
-
-respPT = (respPT - param.M) ./ param.SD;
 
 end
