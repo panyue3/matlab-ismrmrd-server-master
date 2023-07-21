@@ -1,7 +1,11 @@
 function fire_matlab_ismrmrd_server(varargin)
-%     addpath('mex');
+    funcPath = fileparts(mfilename('fullpath'));
+    cd(funcPath)
     addpath(genpath('function'))
     setPlotDefault
+    if isempty(gcp('nocreate'))
+        parpool
+    end
     if(isOctave)
         javaaddpath('/usr/share/java/xercesImpl.jar');
         javaaddpath('/usr/share/java/xml-apis.jar');

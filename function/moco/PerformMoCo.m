@@ -11,9 +11,14 @@ align=double(align);
 
 voxelsize = [1 1 1 1];
 header = CreateFtkHeaderInfo(ref, voxelsize);
-
-[moco, dx, dy, dxInv, dyInv] = Matlab_PerformPairWiseMotionCorrection(ref, align, header, iters, sigma);
-
+try
+    [moco, dx, dy, dxInv, dyInv] = Matlab_PerformPairWiseMotionCorrection(ref, align, header, iters, sigma);
+catch
+    newPath = fileparts(mfilename('fullpath'));
+    oldPath = cd(newPath);
+    [moco, dx, dy, dxInv, dyInv] = Matlab_PerformPairWiseMotionCorrection(ref, align, header, iters, sigma);
+    cd(oldPath)
+end
 end
 
 function header = CreateFtkHeaderInfo(data, voxelsize)

@@ -2,6 +2,8 @@ function [net, param] = runTraining(imdata, ptdata, logging)
 
 % Set network parameters
 param = ptdata.param;
+param.maxThred = imdata.maxThred;
+param.minThred = imdata.minThred;
 numRep = size(imdata.shiftvec,1);
 numHiddenUnits = 11;
 numResponses = size(imdata.shiftvec,2);
@@ -90,6 +92,6 @@ OtData = imdata.shiftvec;
 OtData(1:nBeats,:) = nan;
 idx.CV = TOTidxCV{i} + nBeats;
 idx.Train = TOTidxTrain{i} + nBeats;
-param.figName = genPlots(OtData, yData, idx);
+param.figName = genPlots(OtData, yData, param, idx);
 
 end

@@ -347,22 +347,22 @@ classdef connection < handle
         end
 
         function image = read_image(obj)
-            obj.log.info("<-- Received MRD_MESSAGE_ISMRMRD_IMAGE (1022)")
+            % obj.log.info("<-- Received MRD_MESSAGE_ISMRMRD_IMAGE (1022)")
 
-            obj.log.debug("   Reading in %d bytes of image header", constants.SIZEOF_MRD_IMAGE_HEADER)
+            % obj.log.debug("   Reading in %d bytes of image header", constants.SIZEOF_MRD_IMAGE_HEADER)
             header_bytes = read(obj,constants.SIZEOF_MRD_IMAGE_HEADER);
             header = ismrmrd.ImageHeader(uint8(header_bytes));
 
             attrib_length = typecast(read(obj,constants.SIZEOF_MRD_MESSAGE_ATTRIB_LENGTH), 'uint64');
-            obj.log.debug("   Reading in %d bytes of attributes", attrib_length)
+            % obj.log.debug("   Reading in %d bytes of attributes", attrib_length)
             attribs = char(read(obj, attrib_length))';
-%             obj.log.debug("   Attributes: %s", attribs)
+            % obj.log.debug("   Attributes: %s", attribs)
 
-            obj.log.debug("   Image is size %d x %d x %d with %d channels of type %s", header.matrix_size(1), header.matrix_size(2), header.matrix_size(3), header.channels, ismrmrd.ImageHeader.getMrdDatatypeName(header.data_type))
+            % obj.log.debug("   Image is size %d x %d x %d with %d channels of type %s", header.matrix_size(1), header.matrix_size(2), header.matrix_size(3), header.channels, ismrmrd.ImageHeader.getMrdDatatypeName(header.data_type))
             npixels = prod(uint64(header.matrix_size)) * uint64(header.channels);
             nbytes = npixels * header.getDatatypeSize(header.data_type);
 
-            obj.log.debug("   Reading in %d bytes of image data", nbytes)
+            % obj.log.debug("   Reading in %d bytes of image data", nbytes)
             data_bytes = read(obj, nbytes);
 
             image = ismrmrd.Image(header);

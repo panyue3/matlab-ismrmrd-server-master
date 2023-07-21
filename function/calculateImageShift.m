@@ -118,8 +118,9 @@ for iOri = 1:nOri
                 end
             end
 
-            valMed= median(squeeze(mean(Dx_crop, [1,2])));
-            idx = find(squeeze(mean(Dx_crop, [1,2])) == valMed,1) + 1;
+            [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
+            % valMed= median(squeeze(mean(Dx_crop, [1,2])));
+            % idx = find(squeeze(mean(Dx_crop, [1,2])) == valMed,1) + 1;
         else
             idx = round(nRep/2);
         end
@@ -188,13 +189,9 @@ for iOri = 1:nOri
     end
     % === Save MOCOed images ===
 
-    % +++ Save outlier +++
-    thrd = min([mean(ssimval(:,iOri),'omitnan') - 3*std(ssimval(:,iOri),[],'omitnan') 2.5*quantile(ssimval(:,iOri), 0.25)-1.5*quantile(ssimval(:,iOri), 0.75)]);
-    isoutlier(ssimval(:,iOri) < thrd) = true;
-    % === Save outlier ===
-
     % +++ Plot SSIM  +++
     if ispc
+        thrd = min([mean(ssimval(:,iOri),'omitnan') - 3*std(ssimval(:,iOri),[],'omitnan') 2.5*quantile(ssimval(:,iOri), 0.25)-1.5*quantile(ssimval(:,iOri), 0.75)]);
         fig = figure(1);
         subplot(double(nOri),1,double(iOri))
         plot(ssimval(:,iOri),'*')
@@ -217,7 +214,6 @@ imshift(:,~imshift(end,:)) = squeeze(imDisp(:,~imshift(end,:),idx(2)));
 
 if nRep ~= (max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1)
     imshift(1,:) = [];
-    isoutlier(1) = [];
 end
 
 % Save SSIM plot
