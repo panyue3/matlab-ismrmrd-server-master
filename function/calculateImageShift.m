@@ -1,4 +1,4 @@
-function [imshift, refIma_crop] = calculateImageShift(group, metadata, logging, ref)
+function imdata = calculateImageShift(group, metadata, logging, ref)
 
 % Set MOCO parameters
 moco = 1; % MOCO method: 1 - Siemens, 2 - Demon
@@ -119,6 +119,7 @@ for iOri = 1:nOri
             end
 
             [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
+            idx = idx+1;
             % valMed= median(squeeze(mean(Dx_crop, [1,2])));
             % idx = find(squeeze(mean(Dx_crop, [1,2])) == valMed,1) + 1;
         else
@@ -215,6 +216,10 @@ imshift(:,~imshift(end,:)) = squeeze(imDisp(:,~imshift(end,:),idx(2)));
 if nRep ~= (max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1)
     imshift(1,:) = [];
 end
+
+imdata.shiftvec = imshift;
+imdata.ref_crop = refIma_crop;
+imdata.isFlip = isFlip;
 
 % Save SSIM plot
 if ispc

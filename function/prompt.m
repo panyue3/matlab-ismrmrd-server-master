@@ -22,7 +22,7 @@ classdef prompt < handle
             runTraining = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTcalibrate'))).value); %contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true);
             sendRTFB = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTShift'))).value);
             if ~runTraining
-                predshift = [];
+                predshift = []; predgate = [];
 
                 % Load training result. If multiple training was done, read in the last file generated
                 tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
@@ -121,10 +121,11 @@ classdef prompt < handle
                                         shiftvector = obj.run_predict(ptGroup, ecgGroup, net, param, metadata, logging);
                                     end
                                     elapsedTime = toc;
-                                    isSkipAcq = logical(shiftvector(3) <= param.maxThred && shiftvector(3) >= param.minThred);
+                                    isSkipAcq = logical(shiftvector(3) > param.gate(2) || shiftvector(3) < param.gate(1));
                                     predshift(end+1,:) = shiftvector;
+                                    predgate(end+1) = isSkipAcq;
                                     feedbackData = PTshiftFBData(shiftvector, isSkipAcq, logging);
-                                    logging.debug("Predicted shift dX: %.2f, dY: %.2f, dZ: %.2f. Accept: %i. -- Time used: %f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), isSkipAcq, elapsedTime)
+                                    logging.debug("Predicted shift dX: %.2f, dY: %.2f, dZ: %.2f. Skip: %i. -- Time used: %f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), isSkipAcq, elapsedTime)
 
                                     % Send shift vector through Feedback
                                     if sendRTFB && ~any(isnan(shiftvector))
@@ -132,6 +133,7 @@ classdef prompt < handle
                                     end
                                 else
                                     predshift(end+1,:) = nan(1,3);
+                                    predgate(end+1) = true;
                                 end
                             end
                         end
@@ -145,6 +147,10 @@ classdef prompt < handle
                 end
             catch ME
                 logging.error(sprintf('%s\nError in %s (%s) (line %d)', ME.message, ME.stack(1).('name'), ME.stack(1).('file'), ME.stack(1).('line')));
+            end
+
+            if ~exist('info','var')
+                load(fullfile(trainlist(end).folder,trainlist(end).name), 'info')
             end
 
             % ----------------------------------------------------------
@@ -162,8 +168,6 @@ classdef prompt < handle
                     connection.send_image(image);
                 end
                 imgGroup = cell(1,0);
-            elseif ~exist('info','var')
-                load(fullfile(trainlist(end).folder,trainlist(end).name), 'info')
             end
 
             % ----------------------------------------------------------
@@ -200,10 +204,10 @@ classdef prompt < handle
                 
                 if exist('predshift','var')
                     if ~sendRTFB && exist('imdata','var')
-                        save(filename,'imdata', 'predshift', 'param');
+                        save(filename,'imdata', 'predshift', 'predgate', 'param');
                         image = obj.plot_predict(imdata.shiftvec, predshift, param, info, metadata, logging);
                     else
-                        save(filename,'predshift');
+                        save(filename,'predshift', 'predgate');
                         image = obj.plot_predict([], predshift, param, info, metadata, logging);
                     end
                     logging.debug("Sending image to client");
@@ -232,27 +236,31 @@ classdef prompt < handle
 
             % Calculate image shift
             if nargin < 5
-                [imdata.shiftvec, ref_crop]  = calculateImageShift(group, metadata, logging);
+                imdata  = calculateImageShift(group, metadata, logging);
             else
-                [imdata.shiftvec, ref_crop]  = calculateImageShift(group, metadata, logging, ref);
+                imdata  = calculateImageShift(group, metadata, logging, ref);
             end
 
             % Find acceptance range
-            percentRange = 40;
+            percentRange = 25;
             [minZ, maxZ] = bounds(imdata.shiftvec(:,3));
-            imdata.maxThred = maxZ + (maxZ - minZ)*percentRange/2/100;
-            imdata.minThred = maxZ - (maxZ - minZ)*percentRange/2/100;
+            imdata.gate(1) = maxZ - (maxZ - minZ)*percentRange/100;
+            imdata.gate(2) = maxZ + (maxZ - minZ)*percentRange/100;
 
             % Pack cropped reference images
-            for ii = 1:size(ref_crop,3)
-                ima = ismrmrd.Image(single(ref_crop(:,:,ii)));
+            for ii = 1:size(imdata.ref_crop,3)
+                if imdata.isFlip(ii)
+                    ima = ismrmrd.Image(transpose(single(imdata.ref_crop(:,:,ii))));
+                else
+                    ima = ismrmrd.Image(single(imdata.ref_crop(:,:,ii)));
+                end
 
                 % Copy original image header, but keep the new data_type
                 data_type = ima.head.data_type;
                 ima.head = group{ii}.head;
                 ima.head.data_type = data_type;
                 ima.head.field_of_view = [group{ii}.head.field_of_view(1:2)./3, group{ii}.head.field_of_view(3)];
-                ima.head.matrix_size = size(ref_crop(:,:,ii), [1 2 3]);
+                ima.head.matrix_size = size(ima.data, [1 2 3]);
 
                 % Add to ImageProcessingHistory
                 meta = ismrmrd.Meta.deserialize(group{ii}.attribute_string);
@@ -356,7 +364,7 @@ classdef prompt < handle
             elseif isunix
                 filename = fullfile('/tmp/share/prompt',filename);
             end
-            save(filename,'imdata', 'ptdata', '-append');
+            save(filename,'imdata', 'ptdata', 'info', '-append');
 
             % Run training
             ptdata.param.cor = sign(corr(imdata.shiftvec(:,3),ptdata.data(ptdata.param.pk,:)));
@@ -445,7 +453,7 @@ classdef prompt < handle
                 legend('prediction','Location','northwest'); legend('boxoff')
                 subplot(size(yData,2),1,2); plot(yData(:,2),'k');
                 xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit);
-                subplot(size(yData,2),1,3); plot(yData(:,3),'k'); yline([param.maxThred param.minThred],'--',{'Max','Min'},'LineWidth',3)
+                subplot(size(yData,2),1,3); plot(yData(:,3),'k'); yline(param.gate,'--',{'Min','Max'},'LineWidth',3)
                 xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit);
                 sgtitle('Predited Shift')
                 hold off

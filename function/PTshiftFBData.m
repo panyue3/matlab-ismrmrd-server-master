@@ -22,10 +22,10 @@ classdef PTshiftFBData < handle
 
         function bytes = serialize(obj)
             bytes = cat(2, typecast(obj.shiftVec,'uint8'), ...
-                typecaat(obj.isSkipAcq, 'uint8'));
+                typecast(uint8(obj.isSkipAcq), 'uint8'));
 
-            if (numel(bytes) ~= 12)
-                error('Serialized ImageHeader is %d bytes instead of 198 bytes', numel(bytes));
+            if (numel(bytes) ~= 13)
+                error('Serialized ImageHeader is %d bytes instead of 13 bytes', numel(bytes));
             end
         end
     end

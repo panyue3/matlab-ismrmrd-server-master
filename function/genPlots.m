@@ -16,7 +16,7 @@ legend('data', 'prediction', 'error','Location','northwest'); legend('boxoff')
 subplot(size(otData,2),1,2); plot(otData(:,2),'k'); hold on; plot(yData(:,2),'k--'); plot(eData(:,2),'k:'); 
 xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit); 
 if nargin > 3; plot(idx.CV,eCV(:,2),'bx','MarkerSize',10); end
-subplot(size(otData,2),1,3); plot(otData(:,3),'k'); hold on; plot(yData(:,3),'k--'); plot(eData(:,3),'k:'); yline([param.maxThred param.minThred],'--',{'Max','Min'},'LineWidth',3)
+subplot(size(otData,2),1,3); plot(otData(:,3),'k'); hold on; plot(yData(:,3),'k--'); plot(eData(:,3),'k:'); yline(param.gate,'--',{'Min','Max'},'LineWidth',3)
 xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit); 
 if nargin > 3; plot(idx.CV,eCV(:,3),'bx','MarkerSize',10); end
 if nargin > 3
