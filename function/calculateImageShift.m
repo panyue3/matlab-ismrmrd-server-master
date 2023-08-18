@@ -1,7 +1,7 @@
 function imdata = calculateImageShift(group, metadata, logging, ref)
 
 % Set MOCO parameters
-moco = 1; % MOCO method: 1 - Siemens, 2 - Demon
+moco = 3; % MOCO method: 1 - Siemens, 2 - Demon, 3 - Normalized Cross Correlation
 param.mocoReg = 12;
 Options.SigmaFluid = 5;
 Options.SigmaDiff = 1;
@@ -11,6 +11,7 @@ Options.Similarity = 'p';
 Options.Registration = 'NonRigid';
 Options.MaxRef = 5;
 Options.Verbose = 0;
+validref = false;
 
 % Extract image data
 tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
@@ -58,6 +59,7 @@ if nargin > 3
         try
             imAll = cat(3, ref.refIma, imAll);
             nRep = nRep + 1;
+            validref = true;
         catch
             logging.warn("Can not concatenate images, no external reference used.")
         end
@@ -84,7 +86,7 @@ for iOri = 1:nOri
     BSer = imAll(:,:,:,iOri);
 
     if iOri ==1
-        if ~contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true) && nRep ~= (max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1)
+        if validref
             idx = 1;
         elseif nRep > 10
             [~, zOri] = max(abs(rotMatrix(:,3)));
@@ -95,12 +97,32 @@ for iOri = 1:nOri
                         parfor ii = 1:11
                             Dx_crop(:,:,ii) = imcrop(Dx(:,:,ii),rectSer);
                         end
+                        [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
+
                     case 2
                         Dx_crop = zeros([round(size(imAll,[1 2])/3),11]);
                         parfor ii = 1:11
                             [~, ~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
                             Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
                         end
+                        [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
+
+                    case 3
+                        [x, y] = meshgrid(1:size(BSer, 2), 1:size(BSer, 1));
+                        [xq, yq] = meshgrid(1:0.1:size(BSer, 2), 1:0.1:size(BSer, 1));
+                        parfor ii = 1:11
+                            BSer_interp(:,:,ii) = interp2(x, y, BSer(:,:,ii+1), xq, yq,'spline');
+                        end
+                        rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/3));
+                        ref_interp = imcrop(BSer_interp(:,:,5),rectSer_interp);
+                        parfor ii = 1:11
+                            cross_corr = normxcorr2(ref_interp,BSer_interp(:,:,ii));
+                            [~, imax] = max(abs(cross_corr(:)));
+                            [~, xpeak] = ind2sub(size(cross_corr), imax(1));
+                            xshift(ii) = xpeak - (size(BSer_interp,2) + size(ref_interp,2) + 1)/2;
+                        end
+                        [~, idx] = max(xshift* single(rotMatrix(zOri,3)));
+
                 end
             else
                 switch moco
@@ -109,31 +131,40 @@ for iOri = 1:nOri
                         parfor ii = 1:11
                             Dx_crop(:,:,ii) = imcrop(Dx(:,:,ii),rectSer);
                         end
+                        [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
+
                     case 2
                         Dx_crop = zeros([round(size(imAll,[1 2])/3),11]);
                         parfor ii = 1:11
                             [~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
                             Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
                         end
+                        [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
+
+                    case 3
+                        [x, y] = meshgrid(1:size(BSer, 2), 1:size(BSer, 1));
+                        [xq, yq] = meshgrid(1:0.1:size(BSer, 2), 1:0.1:size(BSer, 1));
+                        parfor ii = 1:11
+                            BSer_interp(:,:,ii) = interp2(x, y, BSer(:,:,ii+1), xq, yq,'spline');
+                        end
+                        rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/3));
+                        ref_interp = imcrop(BSer_interp(:,:,5),rectSer_interp);
+                        parfor ii = 1:11
+                            cross_corr = normxcorr2(ref_interp,BSer_interp(:,:,ii));
+                            [~, imax] = max(abs(cross_corr(:)));
+                            [xpeak, ~] = ind2sub(size(cross_corr), imax(1));
+                            xshift(ii) = xpeak - (size(BSer_interp,1) + size(ref_interp,1) + 1)/2;
+                        end
+                        [~, idx] = max(xshift* single(rotMatrix(zOri,3)));
+
                 end
             end
-
-            [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
             idx = idx+1;
-            % valMed= median(squeeze(mean(Dx_crop, [1,2])));
-            % idx = find(squeeze(mean(Dx_crop, [1,2])) == valMed,1) + 1;
         else
             idx = round(nRep/2);
         end
 
-        if contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true)
-            refIma = imAll(:,:,idx,:);
-            if ispc
-                save(fullfile(pwd,'output',filename),'refIma','isFlip');
-            elseif isunix
-                save(fullfile('/tmp/share/prompt',filename),'refIma','isFlip');
-            end
-        end
+        refIma = imAll(:,:,idx,:);
     end
     % === Find end respiratory frame by MOCO first 10 frame ===
 
@@ -155,6 +186,8 @@ for iOri = 1:nOri
 %                 nmse(iRep,iOri) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
                 ssimval(iRep,iOri) =  ssim(Iref, Ireg)
             end
+            imDisp(:,:,iOri) = [squeeze(mean(mean(Dy_Ser_crop,1),2))*szPix(1), squeeze(mean(mean(Dx_Ser_crop,1),2))*szPix(2)] * single(rotMatrix);
+
         case 2
             Dx_Ser_crop = nan([round(size(BSer,[1 2])/3),nRep]);
             Dy_Ser_crop = nan([round(size(BSer,[1 2])/3),nRep]);
@@ -171,6 +204,27 @@ for iOri = 1:nOri
 %                 nmse(iRep,iOri) = sum((Iref(:) - Ireg(:)).^2)/sum(Iref(:).^2);
                 ssimval(iRep,iOri) =  ssim(Iref, Ireg)
             end
+            imDisp(:,:,iOri) = [squeeze(mean(mean(Dy_Ser_crop,1),2))*szPix(1), squeeze(mean(mean(Dx_Ser_crop,1),2))*szPix(2)] * single(rotMatrix);
+
+        case 3
+            [x, y] = meshgrid(1:size(BSer, 2), 1:size(BSer, 1));
+            [xq, yq] = meshgrid(1:0.1:size(BSer, 2), 1:0.1:size(BSer, 1));
+            parfor iRep = 1:size(BSer,3)
+                BSer_interp(:,:,iRep) = interp2(x, y, BSer(:,:,iRep), xq, yq,'spline');
+            end
+            rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/3));
+            Iref = imcrop(BSer_interp(:,:,idx),rectSer_interp);
+            parfor iRep = 1:size(BSer,3)
+                cross_corr = normxcorr2(Iref,BSer_interp(:,:,iRep));
+                [ssimval(iRep,iOri), imax] = max(abs(cross_corr(:)));
+                [ypeak, xpeak] = ind2sub(size(cross_corr), imax(1));
+                yshift(iRep) = ypeak - (size(BSer_interp,1) + size(Iref,1) + 1)/2;
+                xshift(iRep) = xpeak - (size(BSer_interp,2) + size(Iref,2) + 1)/2;
+                Ireg = imtranslate(BSer(:,:,iRep), [-xshift(iRep)/10 -yshift(iRep)/10], 'FillValues', 0, 'OutputView', 'same');
+                Icomb(:,:,iRep) = cat(2, BSer(:,:,iRep), Ireg);
+            end
+            imDisp(:,:,iOri) = [xshift(:)*szPix(1)/10, yshift(:)*szPix(2)/10] * single(rotMatrix);
+
     end
     % === MOCO all images use end respiratory frame as reference ===
 
@@ -191,21 +245,20 @@ for iOri = 1:nOri
     % === Save MOCOed images ===
 
     % +++ Plot SSIM  +++
-    if ispc
-        thrd = min([mean(ssimval(:,iOri),'omitnan') - 3*std(ssimval(:,iOri),[],'omitnan') 2.5*quantile(ssimval(:,iOri), 0.25)-1.5*quantile(ssimval(:,iOri), 0.75)]);
-        fig = figure(1);
-        subplot(double(nOri),1,double(iOri))
-        plot(ssimval(:,iOri),'*')
-        if sum(ssimval(:,iOri) < thrd)
-            hold on
-            line([0 nRep],[thrd thrd],'Color','k','LineStyle','--')
-            hold off
-        end
-        title(sprintf('Ref frame %i, Mean SSIM: %0.2f',idx,mean(ssimval(:,iOri),'omitnan')))
-    end
+%     if ispc
+%         thrd = min([mean(ssimval(:,iOri),'omitnan') - 3*std(ssimval(:,iOri),[],'omitnan') 2.5*quantile(ssimval(:,iOri), 0.25)-1.5*quantile(ssimval(:,iOri), 0.75)]);
+%         fig = figure(99);
+%         subplot(double(nOri),1,double(iOri))
+%         plot(ssimval(:,iOri),'*')
+%         if sum(ssimval(:,iOri) < thrd)
+%             hold on
+%             line([0 nRep],[thrd thrd],'Color','k','LineStyle','--')
+%             hold off
+%         end
+%         title(sprintf('Ref frame %i, Mean SSIM: %0.2f',idx,mean(ssimval(:,iOri),'omitnan')))
+%     end
     % === Plot SSIM ===
 
-    imDisp(:,:,iOri) = [squeeze(mean(mean(Dy_Ser_crop,1),2))*szPix(1), squeeze(mean(mean(Dx_Ser_crop,1),2))*szPix(2)] * single(rotMatrix);
     refIma_crop(:,:,iOri) = Iref;
 end    % end of count Ori
 
@@ -220,12 +273,13 @@ end
 imdata.shiftvec = imshift;
 imdata.ref_crop = refIma_crop;
 imdata.isFlip = isFlip;
+imdata.refIma = refIma;
 
 % Save SSIM plot
-if ispc
-    figname = sprintf("%s.%s_%s_SSIM.png", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
-    saveas(fig, fullfile(pwd,'output',figname))
-    close(fig)
-end
+% if ispc
+%     figname = sprintf("%s.%s_%s_SSIM.png", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
+%     saveas(fig, fullfile(pwd,'output',figname))
+%     close(fig)
+% end
 
 end

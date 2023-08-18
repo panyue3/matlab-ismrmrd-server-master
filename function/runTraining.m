@@ -5,20 +5,30 @@ param = ptdata.param;
 param.gate = imdata.gate;
 numRep = size(imdata.shiftvec,1);
 numHiddenUnits = 11;
+% dropoutRate = 0.4;
 numResponses = size(imdata.shiftvec,2);
 netstruct = 'LSTM';
+solName = 'rmsprop';
+gradthreMod = 'l2norm';
+gradThred = 0.25;
+initLearnRate = 0.075;
+maxEpoch = 3500;
+l2Reg =0.025;
+miniBatchSz = 1024;
 
 switch netstruct
     case 'LSTM'
         layers = [...
             sequenceInputLayer(param.numVCha* 2)
             lstmLayer(numHiddenUnits,'OutputMode','last')
+%             dropoutLayer(dropoutRate)
             fullyConnectedLayer(numResponses)
             regressionLayer];
     case 'BiLSTM'
         layers = [...
             sequenceInputLayer(param.numVCha*2)
             bilstmLayer(numHiddenUnits,'OutputMode','last')
+%             dropoutLayer(dropoutRate)
             fullyConnectedLayer(numResponses)
             regressionLayer];
 end
@@ -30,8 +40,8 @@ parfor nSecs=1:10
     nBeats = sum(ptdata.time(param.pk)<nSecs);
     InData{numRep-nBeats} = [];
     for ii = 1:(numRep-nBeats)
-        InData{ii} = ptdata.data(param.pk(nBeats+ii)-param.numPT*nSecs+1:param.pk(nBeats+ii),:)';
-        InData{ii} = (InData{ii} - mean(InData{ii},2)) ./ std(InData{ii},[],2);
+        temp = ptdata.data(param.pk(nBeats+ii)-param.numPT*nSecs+1:param.pk(nBeats+ii),:);
+        InData{ii} = ((temp - mean(temp)) ./ std(temp))';
     end
     OtData = imdata.shiftvec(nBeats+1:numRep,:);
 
@@ -42,14 +52,14 @@ parfor nSecs=1:10
     OtTrain = OtData(idxTrain,:);
     OtCV = OtData(idxCV,:);
 
-    options = trainingOptions('rmsprop', ...
+    options = trainingOptions(solName, ...
         'ExecutionEnvironment','cpu', ...
-        'GradientThreshold',0.25, ...
-        'GradientThresholdMethod','l2norm', ...
-        'MaxEpochs',3500, ...
-        'MiniBatchSize',1024, ...
-        'InitialLearnRate',0.075, ...
-        'L2Regularization',0.025, ...
+        'GradientThreshold',gradThred, ...
+        'GradientThresholdMethod',gradthreMod, ...
+        'MaxEpochs',maxEpoch, ...
+        'MiniBatchSize',miniBatchSz, ...
+        'InitialLearnRate',initLearnRate, ...
+        'L2Regularization',l2Reg, ...
         'ValidationData', {InCV', OtCV}, ...
         'OutputNetwork', 'best-validation-loss', ...
         'ValidationPatience',200,...
@@ -92,5 +102,6 @@ OtData(1:nBeats,:) = nan;
 idx.CV = TOTidxCV{i} + nBeats;
 idx.Train = TOTidxTrain{i} + nBeats;
 param.figName = genPlots(OtData, yData, param, idx);
+param.yData = yData;
 
 end

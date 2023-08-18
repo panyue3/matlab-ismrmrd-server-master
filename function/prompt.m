@@ -26,23 +26,21 @@ classdef prompt < handle
 
                 % Load training result. If multiple training was done, read in the last file generated
                 tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
-                filename = sprintf("%s.*.mat", tmp{11});
+                filename = sprintf("train_%s.*.mat", tmp{11});
                 if ispc
                     trainlist = dir(fullfile(pwd,'output',filename));
                 elseif isunix
                     trainlist = dir(fullfile('/tmp/share/prompt',filename));
                 end
 
-                if isempty(trainlist) || ~contains([trainlist.name],'train', 'IgnoreCase', true)
+                if isempty(trainlist)
                     logging.error("Training was not performed.")
                 else
                     [~,idx] = sort([trainlist.datenum]);
                     trainlist = trainlist(idx);
-                    while ~contains(trainlist(end).name,'train', 'IgnoreCase', true)
-                        trainlist(end) = [];
-                    end
-                    load(fullfile(trainlist(end).folder,trainlist(end).name), 'net', 'param')
-                    ref = load(fullfile(trainlist(end).folder,trainlist(end).name), 'refIma','isFlip');
+                    load(fullfile(trainlist(end).folder,trainlist(end).name), 'net', 'param', 'imdata')
+                    ref.refIma = imdata.refIma; ref.isFlip = imdata.isFlip;
+                    clear imdata
 
                     % Check if coils match training series
                     coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
@@ -76,6 +74,7 @@ classdef prompt < handle
             imgGroup = cell(1,0); % ismrmrd.Image;
             ptGroup = cell(1,0); % ismrmrd.Waveform;
             ecgGroup = cell(1,0); % ismrmrd.Waveform;
+            last_trig = 0;
             try
                 while true
                     item = next(connection);
@@ -109,11 +108,21 @@ classdef prompt < handle
                             ptGroup{end+1} = item;
                         elseif item.head.waveform_id == 0
                             ecgGroup{end+1} = item;                            
-                            if ~ runTraining && sum(item.data(:,5))
+                            if ~ runTraining && sum(item.data(:,5)) && (item.head.time_stamp - last_trig)*2.5*10^-3 > 0.5
+                                last_trig = item.head.time_stamp;
                                 if double(ecgGroup{end}.head.time_stamp - ptGroup{1}.head.time_stamp)*2.5*10^-3 > param.nSecs
                                     nPTclip = 11*200;
                                     nECGclip = 11*10;
-                                    param.startTime = ptGroup{1}.head.time_stamp;   
+                                    if ~isfield(param,'startTime')            
+                                        ncha = cellfun(@(x) x.head.channels, ptGroup);
+                                        ptGroup = ptGroup(ncha == mode(ncha));
+                                        param.startTime = ptGroup{1}.head.time_stamp;
+                                        test_pt = cell2mat(cellfun(@(x) x.data(:,1:end-1), ptGroup, 'UniformOutput', false)');
+                                        test_pt = reshape(typecast(test_pt(:),'single'),[],mode(ncha)-1);
+                                        test_pt = test_pt(1:2:end,:) + test_pt(2:2:end,:)*1i;
+                                        test_valid = logical(cell2mat(cellfun(@(x) x.data(1:2:end,end), ptGroup, 'UniformOutput', false)'));
+                                        param.testM = mean(test_pt(test_valid,:));
+                                    end
                                     tic
                                     if numel(ptGroup) > nPTclip && numel(ecgGroup) > nECGclip
                                         shiftvector = obj.run_predict(ptGroup(end-nPTclip+1:end), ecgGroup(end-nECGclip+1:end), net, param, metadata, logging);
@@ -121,19 +130,24 @@ classdef prompt < handle
                                         shiftvector = obj.run_predict(ptGroup, ecgGroup, net, param, metadata, logging);
                                     end
                                     elapsedTime = toc;
+                                    % =========== For Phantom Test Only =========== %
+                                    % shiftvector = 5*rand(1,3); param.gate = [2 5];
+                                    % =========== For Phantom Test Only =========== %
                                     isSkipAcq = logical(shiftvector(3) > param.gate(2) || shiftvector(3) < param.gate(1));
                                     predshift(end+1,:) = shiftvector;
                                     predgate(end+1) = isSkipAcq;
-                                    feedbackData = PTshiftFBData(shiftvector, isSkipAcq, logging);
+                                    %feedbackData = PTshiftFBData(shiftvector, isSkipAcq, logging);
+                                    feedbackData = PTshiftFBData([0 0 shiftvector(3)], isSkipAcq, logging);
                                     logging.debug("Predicted shift dX: %.2f, dY: %.2f, dZ: %.2f. Skip: %i. -- Time used: %f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), isSkipAcq, elapsedTime)
-
-                                    % Send shift vector through Feedback
-                                    if sendRTFB && ~any(isnan(shiftvector))
-                                        connection.send_feedback('PTShift', feedbackData);
-                                    end
                                 else
                                     predshift(end+1,:) = nan(1,3);
                                     predgate(end+1) = true;
+                                    feedbackData = PTshiftFBData(zeros(1,3), true, logging);
+                                    logging.debug("Collecting PT data, dX: NaN, dY: NaN, dZ: NaN. Skip: true.")
+                                end
+                                % Send shift vector through Feedback
+                                if sendRTFB
+                                    connection.send_feedback('PTShift', feedbackData);
                                 end
                             end
                         end
@@ -149,7 +163,7 @@ classdef prompt < handle
                 logging.error(sprintf('%s\nError in %s (%s) (line %d)', ME.message, ME.stack(1).('name'), ME.stack(1).('file'), ME.stack(1).('line')));
             end
 
-            if ~exist('info','var')
+            if ~runTraining && ~exist('info','var')
                 load(fullfile(trainlist(end).folder,trainlist(end).name), 'info')
             end
 
@@ -167,6 +181,10 @@ classdef prompt < handle
                     logging.debug("Sending image to client");
                     connection.send_image(image);
                 end
+                if exist('imdata')
+                    metadata.userParameters.userParameterLong(end+1).name = 'NumberOfMeasurements';
+                    metadata.userParameters.userParameterLong(end).value = size(imdata.shiftvec,1);
+                end
                 imgGroup = cell(1,0);
             end
 
@@ -180,7 +198,8 @@ classdef prompt < handle
                 else
                     ptdata = obj.process_waveform_test(ptGroup, ecgGroup, param, metadata, logging);
                 end
-                wavGroup = cell(1,0);
+                ptGroup = cell(1,0);
+                ecgGroup = cell(1,0);
             end
 
             % ----------------------------------------------------------
@@ -243,7 +262,11 @@ classdef prompt < handle
 
             % Find acceptance range
             percentRange = 25;
-            [minZ, maxZ] = bounds(imdata.shiftvec(:,3));
+            if size(imdata.shiftvec,1) > 10
+                [minZ, maxZ] = bounds(imdata.shiftvec(6:end,3));
+            else
+                [minZ, maxZ] = bounds(imdata.shiftvec(2:end,3));
+            end            
             imdata.gate(1) = maxZ - (maxZ - minZ)*percentRange/100;
             imdata.gate(2) = maxZ + (maxZ - minZ)*percentRange/100;
 
@@ -311,7 +334,23 @@ classdef prompt < handle
             [ptdata.data, ptdata.time, ptdata.param] = processPT(ptdata, logging);
 
             % Find trigger indices
-            [~, ptdata.param.pk] = min(abs(ptdata.time - ecgdata.time(ecgdata.trigger).'), [], 1);
+            time_mx = ptdata.time - ecgdata.time(ecgdata.trigger).';
+            time_mx(time_mx>0) = nan;
+            [~, ptdata.param.pk] = max(time_mx, [], 1,'omitnan');
+
+            if any(strcmp({metadata.userParameters.userParameterLong.name}, 'NumberOfMeasurements')) && metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'NumberOfMeasurements'))).value < numel(ptdata.param.pk)
+                ntrigs = find(ecgdata.trigger);
+                ecgdata.trigger(ntrigs(find(diff(ecgdata.time(ecgdata.trigger)) < 0.5)+1)) = false;
+                trig_time_diff = (ptdata.rawtime - ecgdata.time(ecgdata.trigger).')>0 & (ptdata.rawtime - ecgdata.time(ecgdata.trigger).') < metadata.sequenceParameters.echo_spacing*5*10^-3;
+                idx_trigs = find(ecgdata.trigger);
+                ecgdata.trigger(idx_trigs(logical(sum(trig_time_diff(~ptdata.isvalid,:))))) = false;
+
+                time_mx = ptdata.time - ecgdata.time(ecgdata.trigger).';
+                time_mx(time_mx>0) = nan;
+                [~, ptdata.param.pk] = max(time_mx, [], 1,'omitnan');
+            end
+
+            ptdata.ecgdata = ecgdata;
 
         end     % end of process_waveform()
 
@@ -336,7 +375,23 @@ classdef prompt < handle
             [ptdata.data, ptdata.time, ptdata.param] = processPT(ptdata, logging, param);
 
             % Find trigger indices
-            [~, ptdata.param.pk] = min(abs(ptdata.time - ecgdata.time(ecgdata.trigger).'), [], 1);
+            time_mx = ptdata.time - ecgdata.time(ecgdata.trigger).';
+            time_mx(time_mx>0) = nan;
+            [~, ptdata.param.pk] = max(time_mx, [], 1,'omitnan');
+
+            if any(strcmp({metadata.userParameters.userParameterLong.name}, 'NumberOfMeasurements')) && metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'NumberOfMeasurements'))).value < numel(ptdata.param.pk)
+                ntrigs = find(ecgdata.trigger);
+                ecgdata.trigger(ntrigs(find(diff(ecgdata.time(ecgdata.trigger)) < 0.5)+1)) = false;
+                trig_time_diff = (ptdata.rawtime - ecgdata.time(ecgdata.trigger).')>0 & (ptdata.rawtime - ecgdata.time(ecgdata.trigger).') < metadata.sequenceParameters.echo_spacing*5*10^-3;
+                idx_trigs = find(ecgdata.trigger);
+                ecgdata.trigger(idx_trigs(logical(sum(trig_time_diff(~ptdata.isvalid,:))))) = false;
+
+                time_mx = ptdata.time - ecgdata.time(ecgdata.trigger).';
+                time_mx(time_mx>0) = nan;
+                [~, ptdata.param.pk] = max(time_mx, [], 1,'omitnan');
+            end
+
+            ptdata.ecgdata = ecgdata;
 
             % Save figure to output folder
             fig = figure;
@@ -357,19 +412,11 @@ classdef prompt < handle
         %% TRAIN_NETWORK
         function image = train_network(obj, imdata, ptdata, info, metadata, logging)
 
-            tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
-            filename = sprintf("%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
-            if ispc
-                filename = fullfile(pwd,'output',filename);
-            elseif isunix
-                filename = fullfile('/tmp/share/prompt',filename);
-            end
-            save(filename,'imdata', 'ptdata', 'info', '-append');
-
-            % Run training
+            % Find correlation between ptdata and imdata
             ptdata.param.cor = sign(corr(imdata.shiftvec(:,3),ptdata.data(ptdata.param.pk,:)));
             ptdata.data = ptdata.data * diag(ptdata.param.cor);
 
+            % Run training
             logging.info("Training network...")
             [net, param] = runTraining(imdata, ptdata, logging);
             param.coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
@@ -389,13 +436,21 @@ classdef prompt < handle
             param.figName{end+1} = fullfile(pwd,'output','Train_PT.png');
             saveas(fig, param.figName{end})
             close(fig)
-
+            
             for ii = 1:numel(param.figName)
                 data = uint16(255 - rgb2gray(imread(param.figName{ii})))';
                 image{ii} = obj.pack_image(data, info);
             end
 
-            save(filename,'net', 'param', '-append');
+            % Save training data
+            tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
+            filename = sprintf("train_%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
+            if ispc
+                filename = fullfile(pwd,'output',filename);
+            elseif isunix
+                filename = fullfile('/tmp/share/prompt',filename);
+            end
+            save(filename,'imdata', 'ptdata','net', 'param', 'info');
 
         end     % end of train_network()
 
@@ -411,21 +466,40 @@ classdef prompt < handle
             ptdata.rawdata = reshape(typecast(ptdata.rawdata(:),'single'),[],mode(ncha)-1);
             ptdata.rawdata = ptdata.rawdata(1:2:end,:) + ptdata.rawdata(2:2:end,:)*1i;
             ptdata.isvalid = logical(cell2mat(cellfun(@(x) x.data(1:2:end,end), ptGroup, 'UniformOutput', false)'));
-            ptdata.rawtime = (0:numel(ptdata.isvalid)-1)'*500*10^-6;
+            ptdata.rawtime = (0:numel(ptdata.isvalid)-1)'*500*10^-6 + double(ptGroup{1}.head.time_stamp - param.startTime)*2.5*10^-3;
             % Extract ecg data
             ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
             ecgdata.time =  double((ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+uint32(ecgGroup{end}.head.number_of_samples)) - param.startTime)'*2.5*10^-3;
+            if numel(ecgdata.time) > numel(ecgdata.trigger)
+                ecgdata.time(numel(ecgdata.trigger)+1:end) = [];
+            end
 
             % Process PT
             [ptdata.data, ptdata.time] = processPT(ptdata, logging, param);
 
             % Find trigger indices
-            [~, param.pk] = min(abs(ptdata.time - ecgdata.time(ecgdata.trigger).'), [], 1);
+            ntrigs = find(ecgdata.trigger);
+            ecgdata.trigger(ntrigs(find(diff(ecgdata.time(ecgdata.trigger)) < 0.5)+1)) = false;
+%             trig_time_diff = (ptdata.rawtime - ecgdata.time(ecgdata.trigger).')>0 & (ptdata.rawtime - ecgdata.time(ecgdata.trigger).') < metadata.sequenceParameters.echo_spacing*2*10^-3;
+%             idx_trigs = find(ecgdata.trigger);
+%             ecgdata.trigger(idx_trigs(logical(sum(trig_time_diff(~ptdata.isvalid,:))))) = false;
+
+            time_mx = ptdata.time - ecgdata.time(ecgdata.trigger).';
+            time_mx(time_mx>0) = nan;
+            [~, param.pk] = max(time_mx, [], 1,'omitnan');
 
             % Pack PT into NN input array
-            InData = ptdata.data(param.pk(end)-param.numPT*param.nSecs+1:param.pk(end),:)';
-            InData = (InData - mean(InData,2)) ./ std(InData,[],2);
+            temp = ptdata.data(param.pk(end)-param.numPT*param.nSecs+1:param.pk(end),:);
+            InData = ((temp - mean(temp)) ./ std(temp))';
             shiftvector = predict(net,InData,'MiniBatchSize',1);
+            
+%             figure(1)
+%             plot(ptdata.rawtime,abs(ptdata.rawdata(:,1)))
+%             hold on
+%             xline(ptdata.time(param.pk))
+%             plot(ecgdata.time, ecgdata.trigger*0.1)
+%             plot(ptdata.time(param.pk(end)-param.numPT*param.nSecs+1:param.pk(end)),temp(:,1)-mean(temp(:,1)),'*')
+%             hold off
 
         end     % end of run_predict()
 
@@ -433,11 +507,7 @@ classdef prompt < handle
         function image = plot_predict(obj, OtData, yData, param, info, metadata, logging)
             
             % Check matrix size 
-            if ~isempty(OtData)
-                if any(size(OtData) ~= size(yData))
-                    logging.error('Ground truth and prediction matrices size do not match')
-                end
-    
+            if ~isempty(OtData) && ~any(size(OtData) ~= size(yData))
                 OtData(1:sum(isnan(yData(:,1))),:) = nan;
                 figName = genPlots(OtData, yData, param);
 
