@@ -2,7 +2,7 @@ function [net, param] = runTraining(imdata, ptdata, logging)
 
 % Set network parameters
 param = ptdata.param;
-param.gate = imdata.gate;
+param.endExp = imdata.endExp;
 numRep = size(imdata.shiftvec,1);
 numHiddenUnits = 11;
 % dropoutRate = 0.4;

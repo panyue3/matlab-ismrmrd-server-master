@@ -22,7 +22,9 @@ classdef getpmu < handle
             end
 
             % Continuously parse incoming data parsed from MRD messages
+            acqGroup = cell(1,0); % ismrmrd.Acquisition;
             wavGroup = cell(1,0); % ismrmrd.Waveform;
+
             try
                 while true
                     item = next(connection);
@@ -31,7 +33,7 @@ classdef getpmu < handle
                     % Raw k-space data messages
                     % ----------------------------------------------------------
                     if isa(item, 'ismrmrd.Acquisition')
-%                         logging.info("Do nothing to k-space data")
+                        acqGroup{end+1} = item;
 
                     % ----------------------------------------------------------
                     % Image data messages
@@ -43,9 +45,9 @@ classdef getpmu < handle
                     % Waveform data messages
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Waveform') 
-                        if item.head.waveform_id == 0
+%                         if item.head.waveform_id == 0
                             wavGroup{end+1} = item;
-                        end
+%                         end
 
                     elseif isempty(item)
                         break;
@@ -66,6 +68,9 @@ classdef getpmu < handle
                 image = obj.process_waveform(wavGroup, metadata, logging);
 %                 logging.debug("Sending image to client");
 %                 connection.send_image(image);
+                logging.info("Processing a group of waveform data (untriggered)")
+                save(['C:\MIDEA\NXVA31A_176478\Data\mat\' metadata.measurementInformation.protocolName '.mat'],'metadata','wavGroup','acqGroup')
+                acqGroup = cell(1,0);
                 wavGroup = cell(1,0);
             else
                 logging.warn("waveform data was not received.")
@@ -79,7 +84,10 @@ classdef getpmu < handle
         function image = process_waveform(obj, group, metadata, logging)
 
             % Extract ecg data
-            ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, group, 'UniformOutput', false)');
+            wavid = cell2mat(cellfun(@(x) x.head.waveform_id, group, 'UniformOutput', false)');
+            ecgGroup = group(wavid==0);
+            ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
+            ecgdata.data = cell2mat(cellfun(@(x) x.data, ecgGroup, 'UniformOutput', false)');
             ecgdata.time =  double((group{1}.head.time_stamp:group{end}.head.time_stamp+uint32(group{end}.head.number_of_samples))  - group{1}.head.time_stamp)'*2.5*10^-3;
             [~, pk] = findpeaks(double(ecgdata.trigger));
             ecgdata.trigtime = ecgdata.time(pk);

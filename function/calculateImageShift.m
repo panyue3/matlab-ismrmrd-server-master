@@ -1,7 +1,7 @@
 function imdata = calculateImageShift(group, metadata, logging, ref)
 
 % Set MOCO parameters
-moco = 3; % MOCO method: 1 - Siemens, 2 - Demon, 3 - Normalized Cross Correlation
+moco = 1; % MOCO method: 1 - Siemens, 2 - Demon, 3 - Normalized Cross Correlation
 param.mocoReg = 12;
 Options.SigmaFluid = 5;
 Options.SigmaDiff = 1;
@@ -264,7 +264,7 @@ end    % end of count Ori
 
 [~, idx] = sort(mean(ssimval,'omitnan'),'descend');
 imshift = squeeze(imDisp(:,:,idx(1)));
-imshift(:,~imshift(end,:)) = squeeze(imDisp(:,~imshift(end,:),idx(2)));
+imshift(:,~any(imshift,1)) = squeeze(imDisp(:,~any(imshift,1),idx(2)));
 
 if nRep ~= (max(cell2mat(cellfun(@(x) x.head.repetition, group, 'UniformOutput', false))) + 1)
     imshift(1,:) = [];

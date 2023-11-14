@@ -2,10 +2,6 @@ classdef prompt < handle
     methods
         %% PROCESS
         function process(obj, connection, config, metadata, logging)
-            logging.info('Config: \n%s', config);
-            if ~any(strcmp({metadata.userParameters.userParameterLong.name}, 'PilotTone')) || ~metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PilotTone'))).value
-                logging.error("Pilot Tone was not turned on.")
-            end
 
             if isempty(gcp('nocreate'))
                 parpool
@@ -19,10 +15,12 @@ classdef prompt < handle
                 mkdir('/tmp/share/prompt')
             end
 
+            sysFreeMax = contains(metadata.acquisitionSystemInformation.systemModel,'Free.Max','IgnoreCase',true);
             runTraining = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTcalibrate'))).value); %contains(metadata.measurementInformation.protocolName,'train', 'IgnoreCase', true);
-            sendRTFB = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTShift'))).value);
+            sendRTFB = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value);
+            gateWindow = metadata.userParameters.userParameterDouble(find(strcmp({metadata.userParameters.userParameterDouble.name}, 'PTgateWindow'))).value;
             if ~runTraining
-                predshift = []; predgate = [];
+                predshift = []; predskip = [];
 
                 % Load training result. If multiple training was done, read in the last file generated
                 tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
@@ -90,7 +88,7 @@ classdef prompt < handle
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
                         if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
-                            if ~sendRTFB
+                            if ~sendRTFB && (runTraining || contains(metadata.measurementInformation.protocolName,'test', 'IgnoreCase', true))
                                 imgGroup{end+1} = item;
                             end
                             if ~exist('info','var')
@@ -108,7 +106,7 @@ classdef prompt < handle
                             ptGroup{end+1} = item;
                         elseif item.head.waveform_id == 0
                             ecgGroup{end+1} = item;                            
-                            if ~ runTraining && sum(item.data(:,5)) && (item.head.time_stamp - last_trig)*2.5*10^-3 > 0.5
+                            if ~runTraining && sum(item.data(:,5)) && (item.head.time_stamp - last_trig)*2.5*10^-3 > 0.5
                                 last_trig = item.head.time_stamp;
                                 if double(ecgGroup{end}.head.time_stamp - ptGroup{1}.head.time_stamp)*2.5*10^-3 > param.nSecs
                                     nPTclip = 11*200;
@@ -131,17 +129,25 @@ classdef prompt < handle
                                     end
                                     elapsedTime = toc;
                                     % =========== For Phantom Test Only =========== %
-                                    % shiftvector = 5*rand(1,3); param.gate = [2 5];
+                                    % shiftvector = 10*rand(1,3); param.endExp = 10;
                                     % =========== For Phantom Test Only =========== %
+                                    % update param.endExp to accommodate respiratory shift
+                                    if shiftvector(3) > param.endExp  && any(predshift(end-19:end,3)>param.endExp)
+                                        param.endExp = shiftvector(3);
+                                    elseif size(predskip,1) > 19 && sum(predskip(end-19:end,1)) == 20
+                                        param.endExp = max(predshift(end-19:end,3));
+                                    end
+                                    param.gate = [param.endExp-gateWindow, param.endExp+gateWindow];
                                     isSkipAcq = logical(shiftvector(3) > param.gate(2) || shiftvector(3) < param.gate(1));
                                     predshift(end+1,:) = shiftvector;
-                                    predgate(end+1) = isSkipAcq;
+                                    predskip(end+1,:) = [double(isSkipAcq), param.gate];
                                     %feedbackData = PTshiftFBData(shiftvector, isSkipAcq, logging);
                                     feedbackData = PTshiftFBData([0 0 shiftvector(3)], isSkipAcq, logging);
-                                    logging.debug("Predicted shift dX: %.2f, dY: %.2f, dZ: %.2f. Skip: %i. -- Time used: %f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), isSkipAcq, elapsedTime)
-                                else
+                                    logging.debug("Predicted shift dX: %.2f, dY: %.2f, dZ: %.2f. Skip: %i. -- Time used: %f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), isSkipAcq, elapsedTime)   
+                                else % PT samples not sufficient for prediction
+                                    param.gate = [param.endExp-gateWindow, param.endExp+gateWindow];
                                     predshift(end+1,:) = nan(1,3);
-                                    predgate(end+1) = true;
+                                    predskip(end+1,:) = [1, param.gate];
                                     feedbackData = PTshiftFBData(zeros(1,3), true, logging);
                                     logging.debug("Collecting PT data, dX: NaN, dY: NaN, dZ: NaN. Skip: true.")
                                 end
@@ -149,8 +155,8 @@ classdef prompt < handle
                                 if sendRTFB
                                     connection.send_feedback('PTShift', feedbackData);
                                 end
-                            end
-                        end
+                            end     % ~runTraining & ecg triggered
+                        end     % if waveform_id is 0 or 16
 
                     elseif isempty(item)
                         break;
@@ -161,7 +167,7 @@ classdef prompt < handle
                 end
             catch ME
                 logging.error(sprintf('%s\nError in %s (%s) (line %d)', ME.message, ME.stack(1).('name'), ME.stack(1).('file'), ME.stack(1).('line')));
-            end
+            end % done collecting data
 
             if ~runTraining && ~exist('info','var')
                 load(fullfile(trainlist(end).folder,trainlist(end).name), 'info')
@@ -195,7 +201,7 @@ classdef prompt < handle
                 logging.info("Processing a group of PT data (untriggered)")
                 if runTraining
                     ptdata = obj.process_waveform(ptGroup, ecgGroup, metadata, logging);
-                else
+                elseif exist('param','var')
                     ptdata = obj.process_waveform_test(ptGroup, ecgGroup, param, metadata, logging);
                 end
                 ptGroup = cell(1,0);
@@ -222,11 +228,12 @@ classdef prompt < handle
                 end
                 
                 if exist('predshift','var')
-                    if ~sendRTFB && exist('imdata','var')
-                        save(filename,'imdata', 'predshift', 'predgate', 'param');
+                    param.predskip = predskip;
+                    if exist('imdata','var')
+                        save(filename,'imdata', 'predshift', 'predskip', 'param');
                         image = obj.plot_predict(imdata.shiftvec, predshift, param, info, metadata, logging);
                     else
-                        save(filename,'predshift', 'predgate');
+                        save(filename,'predshift', 'predskip');
                         image = obj.plot_predict([], predshift, param, info, metadata, logging);
                     end
                     logging.debug("Sending image to client");
@@ -237,7 +244,7 @@ classdef prompt < handle
                     end
 
                 else
-                    logging.error("Predicted shift data not found")
+                    logging.warn("Predicted shift data not found")
                 end
             end
 
@@ -260,15 +267,17 @@ classdef prompt < handle
                 imdata  = calculateImageShift(group, metadata, logging, ref);
             end
 
-            % Find acceptance range
-            percentRange = 25;
+            % Find end expiratory
             if size(imdata.shiftvec,1) > 10
-                [minZ, maxZ] = bounds(imdata.shiftvec(6:end,3));
+                shiftvec_sort = sort(imdata.shiftvec(6:end,3),'descend');
             else
-                [minZ, maxZ] = bounds(imdata.shiftvec(2:end,3));
-            end            
-            imdata.gate(1) = maxZ - (maxZ - minZ)*percentRange/100;
-            imdata.gate(2) = maxZ + (maxZ - minZ)*percentRange/100;
+                shiftvec_sort = sort(imdata.shiftvec(2:end,3),'descend');
+            end
+            while shiftvec_sort(1) - shiftvec_sort(2) > 0.5
+                shiftvec_sort(1) = [];
+            end
+            imdata.endExp = shiftvec_sort(1);
+            logging.info('Training end expiratory: %.2f.', imdata.endExp)
 
             % Pack cropped reference images
             for ii = 1:size(imdata.ref_crop,3)
@@ -414,6 +423,7 @@ classdef prompt < handle
 
             % Find correlation between ptdata and imdata
             ptdata.param.cor = sign(corr(imdata.shiftvec(:,3),ptdata.data(ptdata.param.pk,:)));
+            ptdata.param.cor(isnan(ptdata.param.cor)) = 1;
             ptdata.data = ptdata.data * diag(ptdata.param.cor);
 
             % Run training
@@ -509,6 +519,7 @@ classdef prompt < handle
             % Check matrix size 
             if ~isempty(OtData) && ~any(size(OtData) ~= size(yData))
                 OtData(1:sum(isnan(yData(:,1))),:) = nan;
+                param.predskip(1:sum(isnan(yData(:,1))),2:3) = nan;
                 figName = genPlots(OtData, yData, param);
 
                 for ii = 1:numel(figName)
@@ -523,7 +534,9 @@ classdef prompt < handle
                 legend('prediction','Location','northwest'); legend('boxoff')
                 subplot(size(yData,2),1,2); plot(yData(:,2),'k');
                 xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit);
-                subplot(size(yData,2),1,3); plot(yData(:,3),'k'); yline(param.gate,'--',{'Min','Max'},'LineWidth',3)
+                subplot(size(yData,2),1,3); plot(yData(:,3),'k'); 
+                if isfield(param,'predskip'); hold on; plot(param.predskip(:,2:3),'k--','LineWidth',3); xline(find(~param.predskip(:,1)),'LineWidth',3); hold off;
+                elseif isfield(param,'endExp'); yline(param.endExp,'k-.','end expiration','LineWidth',3); end
                 xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit);
                 sgtitle('Predited Shift')
                 hold off

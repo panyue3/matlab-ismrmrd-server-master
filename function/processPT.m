@@ -14,7 +14,7 @@ dt = 500*10^-6; % in sec
 %% Pre-processing PT data
 ptData = Data.rawdata;
 valid = Data.isvalid;
-time =Data.rawtime;
+time = Data.rawtime;
 if runTraining
     ptData(end,:) = [];
     valid(end) = [];
@@ -73,10 +73,11 @@ if runTraining
     param.V = V(:,vIdx(1:param.numVCha));
     rovirData = interpData*param.V;
 
-    filtData = cat(2,real(rovirData),imag(rovirData));
-    parfor i=1:param.numVCha*2
-        filtData(:,i) = lanczosfilter(filtData(:,i), dt, 0.5*(1/dt/param.dsRate));
-    end
+    filtData = medfilt1(cat(2,real(rovirData),imag(rovirData)), param.dsRate, [], 1);
+%     filtData = cat(2,real(rovirData),imag(rovirData));
+%     parfor i=1:param.numVCha*2
+%         filtData(:,i) = lanczosfilter(filtData(:,i), dt, 0.5*(1/dt/param.dsRate));
+%     end
     respPT = downsample(filtData,param.dsRate);
     respPT(1,:) = [];
     respTime(1,:) = [];
@@ -84,10 +85,11 @@ if runTraining
     param.trainM = mean(ptData);
 else
     rovirData = interpData*param.V;
-    filtData = cat(2,real(rovirData),imag(rovirData));
-    parfor i=1:param.numVCha*2
-        filtData(:,i) = lanczosfilter(filtData(:,i), dt, 0.5*(1/dt/param.dsRate));
-    end
+    filtData = medfilt1(cat(2,real(rovirData),imag(rovirData)), param.dsRate, [], 1);
+%     filtData = cat(2,real(rovirData),imag(rovirData));
+%     parfor i=1:param.numVCha*2
+%         filtData(:,i) = lanczosfilter(filtData(:,i), dt, 0.5*(1/dt/param.dsRate));
+%     end
     respPT = downsample(filtData,param.dsRate) * diag(param.cor);
 end
 

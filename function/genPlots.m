@@ -17,7 +17,10 @@ subplot(size(otData,2),1,2); plot(otData(:,2),'k'); hold on; plot(yData(:,2),'k-
 xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit); 
 if nargin > 3; plot(idx.CV,eCV(:,2),'bx','MarkerSize',10); end
 subplot(size(otData,2),1,3); plot(otData(:,3),'k'); hold on; plot(yData(:,3),'k--'); plot(eData(:,3),'k:'); 
-if nargin > 2; yline(param.gate,'--',{'Min','Max'},'LineWidth',3); end
+if nargin > 2 
+    if isfield(param,'predskip'); hold on; plot(param.predskip(:,2:3),'k--','LineWidth',3); xline(find(~param.predskip(:,1)),'LineWidth',3); hold off
+    elseif isfield(param,'endExp'); yline(param.endExp,'k-.','end expiration','LineWidth',3); end
+end
 xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit); 
 if nargin > 3; plot(idx.CV,eCV(:,3),'bx','MarkerSize',10); end
 if nargin > 3
