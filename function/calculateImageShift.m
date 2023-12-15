@@ -229,19 +229,19 @@ for iOri = 1:nOri
     % === MOCO all images use end respiratory frame as reference ===
 
     % +++ Save MOCOed images +++
-    if ispc
-        clear im
-        figname = sprintf("%s.%s_%s_IMG_MOCO_Ori%i.gif",tmp{11}, tmp{end}, metadata.measurementInformation.protocolName, iOri);
-        for iRep = 1:nRep
-            im = uint8(Icomb(:,:,iRep)/max(Iref(:))*255);
-
-            if iRep == 1
-                imwrite(im,fullfile(pwd,'output',figname), 'gif', 'Loopcount', inf);
-            else
-                imwrite(im,fullfile(pwd,'output',figname),'gif', 'DelayTime', 0.25, 'WriteMode','append');
-            end
-        end
-    end
+%     if ispc
+%         clear im
+%         figname = sprintf("%s.%s_%s_IMG_MOCO_Ori%i.gif",tmp{11}, tmp{end}, metadata.measurementInformation.protocolName, iOri);
+%         for iRep = 1:nRep
+%             im = uint8(Icomb(:,:,iRep)/max(Iref(:))*255);
+% 
+%             if iRep == 1
+%                 imwrite(im,fullfile(pwd,'output',figname), 'gif', 'Loopcount', inf);
+%             else
+%                 imwrite(im,fullfile(pwd,'output',figname),'gif', 'DelayTime', 0.25, 'WriteMode','append');
+%             end
+%         end
+%     end
     % === Save MOCOed images ===
 
     % +++ Plot SSIM  +++

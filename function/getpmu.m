@@ -22,7 +22,6 @@ classdef getpmu < handle
             end
 
             % Continuously parse incoming data parsed from MRD messages
-            acqGroup = cell(1,0); % ismrmrd.Acquisition;
             wavGroup = cell(1,0); % ismrmrd.Waveform;
 
             try
@@ -33,13 +32,19 @@ classdef getpmu < handle
                     % Raw k-space data messages
                     % ----------------------------------------------------------
                     if isa(item, 'ismrmrd.Acquisition')
-                        acqGroup{end+1} = item;
+%                         logging.info("Do nothing to raw data")
 
                     % ----------------------------------------------------------
                     % Image data messages
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
 %                         logging.info("Do nothing to image data")
+                            if ~exist('info','var')
+                                % Save header info for image generation
+                                global info
+                                info.head = item.head;
+                                info.attribute_string = item.attribute_string;
+                            end
 
                     % ----------------------------------------------------------
                     % Waveform data messages
@@ -66,11 +71,14 @@ classdef getpmu < handle
             if ~isempty(wavGroup)
                 logging.info("Processing a group of waveform data (untriggered)")
                 image = obj.process_waveform(wavGroup, metadata, logging);
-%                 logging.debug("Sending image to client");
-%                 connection.send_image(image);
+                logging.debug("Sending image to client");
+                connection.send_image(image);
                 logging.info("Processing a group of waveform data (untriggered)")
-                save(['C:\MIDEA\NXVA31A_176478\Data\mat\' metadata.measurementInformation.protocolName '.mat'],'metadata','wavGroup','acqGroup')
-                acqGroup = cell(1,0);
+%                 if ispc
+%                     save(['C:\MIDEA\NXVA31A_176478\Data\mat\' metadata.measurementInformation.protocolName '.mat'],'metadata','wavGroup','acqGroup')
+%                 elseif isunix
+%                     save(['/tmp/share/prompt/PMU_' metadata.measurementInformation.protocolName '.mat'],'metadata','wavGroup','acqGroup')
+%                 end
                 wavGroup = cell(1,0);
             else
                 logging.warn("waveform data was not received.")
@@ -82,28 +90,43 @@ classdef getpmu < handle
 
         %% PROCESS_WAVEFORM
         function image = process_waveform(obj, group, metadata, logging)
+            global info
+            sysFreeMax = contains(metadata.acquisitionSystemInformation.systemModel,'Free.Max','IgnoreCase',true);
 
             % Extract ecg data
             wavid = cell2mat(cellfun(@(x) x.head.waveform_id, group, 'UniformOutput', false)');
-            ecgGroup = group(wavid==0);
-            ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
+            if sysFreeMax
+                ecgGroup = group(wavid==3);
+                ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,2)==2048, ecgGroup, 'UniformOutput', false)');
+            else
+                ecgGroup = group(wavid==0);
+                ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
+            end
             ecgdata.data = cell2mat(cellfun(@(x) x.data, ecgGroup, 'UniformOutput', false)');
-            ecgdata.time =  double((group{1}.head.time_stamp:group{end}.head.time_stamp+uint32(group{end}.head.number_of_samples))  - group{1}.head.time_stamp)'*2.5*10^-3;
+            ecgdata.time =  double((ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+uint32(ecgGroup{end}.head.number_of_samples)-1)  - ecgGroup{1}.head.time_stamp)'*2.5*10^-3;
             [~, pk] = findpeaks(double(ecgdata.trigger));
             ecgdata.trigtime = ecgdata.time(pk);
 
             % Save figure to output folder
             fig = figure;
-            plot(diff(ecgdata.trigtime)*1000,'o')
-            xlim([0 numel(pk)]);
+            plot(ecgdata.time,ecgdata.data(:,1))
             set(gcf,'Position', [0 0 1200 900])
-            ylim([0 1500])
-            figname = fullfile(pwd,'output','ECG.png');
+            if any(wavid == 16)
+                title(sprintf('PT data exist, total number %i',sum(wavid==16)))
+            else
+                title('No PT data found')
+            end
+
+            if ispc
+                figname = fullfile(pwd,'output','ECG.png');
+            elseif isunix
+                figname = fullfile('/tmp/share/prompt','ECG.png');
+            end
             saveas(fig, figname)
             close(fig)
 
             data = uint16(255 - rgb2gray(imread(figname)))';
-            image = obj.pack_image(data, info);
+            image = pack_image(data, info);
 
         end     % end of process_waveform()
 

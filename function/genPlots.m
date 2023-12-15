@@ -54,11 +54,9 @@ else
 end
 xlabel("Predicted Shift")
 ylabel("Actual Shift")
-m = min(otData,[],'all');
-M=max(otData,[],'all');
-xlim([m M])
-ylim([m M])
-plot([m M], [m M], "r--")
+xlim(ylimit)
+ylim(ylimit)
+plot(ylimit, ylimit, "r--")
 if nargin > 3
     legend('Train','','','dX','dY','dZ','','Location','best')
     figName{2} = fullfile(pwd,'output','Train_Predit.vs.Actual.png');

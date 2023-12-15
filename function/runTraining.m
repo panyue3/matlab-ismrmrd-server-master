@@ -35,10 +35,9 @@ end
 
 %%
 parfor nSecs=1:10
-    % Pack PT and Disp data into NN input and output arrays
-    InData = [];
     nBeats = sum(ptdata.time(param.pk)<nSecs);
-    InData{numRep-nBeats} = [];
+    % Pack PT and Disp data into NN input and output arrays
+    InData = cell(1,numRep-nBeats);
     for ii = 1:(numRep-nBeats)
         temp = ptdata.data(param.pk(nBeats+ii)-param.numPT*nSecs+1:param.pk(nBeats+ii),:);
         InData{ii} = ((temp - mean(temp)) ./ std(temp))';
