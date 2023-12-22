@@ -15,10 +15,10 @@ else
     ylimit = [min(yData(:))-0.5 max(yData(:))+0.5];
     fig = figure;
     subplot(size(yData,2),1,1); plot(yData(:,1),'k-o');
-    xlabel('Time (s)'); ylabel('dX (mm)'); grid('on'); ylim(ylimit);
+    xlabel('Time (s)'); ylabel('dX (mm)'); grid('on'); ylim(ylimit); xlim([0 size(yData,1)])
     legend('prediction','Location','northwest'); legend('boxoff')
     subplot(size(yData,2),1,2); plot(yData(:,2),'k-o');
-    xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit);
+    xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit); xlim([0 size(yData,1)])
     subplot(size(yData,2),1,3); plot(yData(:,3),'k-o');
     if isfield(param,'predskip')
         skpIdx = find(param.predskip(:,1));
@@ -26,7 +26,7 @@ else
     elseif isfield(param,'endExp')
         yline(param.endExp,'k-.','end expiration','LineWidth',3); 
     end
-    xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit);
+    xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit);  xlim([0 size(yData,1)])
     sgtitle('Predited Shift')
     hold off
     set(gcf,'Position', [0 0 1200 900])

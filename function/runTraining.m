@@ -34,8 +34,8 @@ switch netstruct
 end
 
 %%
-parfor nSecs=1:10
-    nBeats = sum(ptdata.time(param.pk)<nSecs);
+parfor nSecs=1:5
+    nBeats = sum((ptdata.time(param.pk)-ptdata.time(1))<nSecs);
     % Pack PT and Disp data into NN input and output arrays
     InData = cell(1,numRep-nBeats);
     for ii = 1:(numRep-nBeats)
@@ -92,7 +92,7 @@ end
 %%
 [~, i] = min(err_cv);
 param.nSecs = i;
-nBeats = sum(ptdata.time(param.pk)<i);
+nBeats = sum((ptdata.time(param.pk)-ptdata.time(1))<i);
 
 net = Net{i};
 yData = cat(1, nan(nBeats,3),TOTyData{i});

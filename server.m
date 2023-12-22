@@ -70,7 +70,11 @@ classdef server < handle
                 % As a shortcut, we accept the file name as text too.
                 if strcmpi(config, "prompt")
                     obj.log.info("Starting prompt processing based on config")
-                    recon = prompt;
+                    if metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTcalibrate'))).value
+                        recon = prompt_calibrate;
+                    else
+                        recon = prompt_rtfb;
+                    end
                 elseif strcmpi(config, "getpmu")
                     obj.log.info("Starting invertcontrast processing based on config")
                     recon = getpmu;

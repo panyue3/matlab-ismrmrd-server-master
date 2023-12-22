@@ -12,6 +12,16 @@ param.coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
 [~, idx] = sort(param.coils);
 param.coils = param.coils(idx);
 
+% Save training data
+tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
+filename = sprintf("train_%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
+if ispc
+    filename = fullfile(pwd,'output',filename);
+elseif isunix
+    filename = fullfile('/tmp/share/prompt',filename);
+end
+save(filename,'imdata', 'ptdata','net', 'param', 'info');
+
 % Save figure to output folder
 fig = figure;
 for i=1:min([ptdata.param.numVCha 4])
@@ -30,15 +40,5 @@ for ii = 1:numel(param.figName)
     data = uint16(255 - rgb2gray(imread(param.figName{ii})))';
     image{ii} = pack_image(data, info);
 end
-
-% Save training data
-tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
-filename = sprintf("train_%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
-if ispc
-    filename = fullfile(pwd,'output',filename);
-elseif isunix
-    filename = fullfile('/tmp/share/prompt',filename);
-end
-save(filename,'imdata', 'ptdata','net', 'param', 'info');
 
 end

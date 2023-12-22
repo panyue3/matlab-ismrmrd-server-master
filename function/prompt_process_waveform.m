@@ -69,7 +69,7 @@ end
 ptEnd = find(~ptdata.isvalid,1,'last');
 ptdata.rawdata = ptdata.rawdata(ptStart:ptEnd,:);
 ptdata.isvalid = ptdata.isvalid(ptStart:ptEnd);
-ptdata.rawtime = ptdata.rawtime(ptStart:ptEnd)-ptdata.rawtime(ptStart);
+ptdata.rawtime = ptdata.rawtime(ptStart:ptEnd);
 ptdata.driftStart = find(~ptdata.isvalid,1,'first');
 
 % Process PT

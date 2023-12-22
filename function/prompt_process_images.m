@@ -1,7 +1,7 @@
 function [image, imdata] = prompt_process_images(group, metadata, logging, ref)
 
 % Calculate image shift
-if nargin < 5
+if nargin < 4
     imdata  = calculateImageShift(group, metadata, logging);
 else
     imdata  = calculateImageShift(group, metadata, logging, ref);
@@ -41,7 +41,7 @@ xlim([0 size(imdata.shiftvec,1)]);
 ylabel('Displacement (mm)'); title('Image Disp');
 legend('dX','dY','dZ','Location','southoutside','NumColumns',3);
 hold off
-if nargin < 5
+if nargin < 4
     figname = fullfile(pwd,'output','Train_Disp.png');
 else
     figname = fullfile(pwd,'output','Test_Disp.png');

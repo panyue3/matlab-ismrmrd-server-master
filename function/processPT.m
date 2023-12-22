@@ -3,9 +3,9 @@ function [respData, respTime, param] = processPT(Data, logging, param)
 %% Define parameters
 if nargin<3
     runTraining = true;
-    param.dsRate = 400;
+    param.dsRate = 50;
     param.numPT = 2000/param.dsRate; % number of PT per second
-    param.numVCha = 2;
+    param.numVCha = 4;
 else
     runTraining = false;
 end

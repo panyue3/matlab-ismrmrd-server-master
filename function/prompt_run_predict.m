@@ -43,5 +43,4 @@ temp = ptdata.data(param.pk(end)-param.numPT*param.nSecs+1:param.pk(end),:);
 InData = ((temp - mean(temp)) ./ std(temp))';
 shiftvector = predict(net,InData,'MiniBatchSize',1);
 
-
 end

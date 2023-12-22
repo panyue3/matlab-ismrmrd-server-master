@@ -9,19 +9,19 @@ if nargin > 3
 end
 
 fig = figure;
-subplot(size(otData,2),1,1); plot(otData(:,1),'k'); hold on; plot(yData(:,1),'k--'); plot(eData(:,1),'k:'); 
-xlabel('Time (s)'); ylabel('dX (mm)'); grid('on'); ylim(ylimit); 
+subplot(size(otData,2),1,1); plot(otData(:,1),'k'); hold on; plot(yData(:,1),'k--'); plot(yData(:,1),'ko'); plot(eData(:,1),'k:'); 
+xlabel('Time (s)'); ylabel('dX (mm)'); grid('on'); ylim(ylimit);  xlim([0 size(yData,1)])
 if nargin > 3; plot(idx.CV,eCV(:,1),'bx','MarkerSize',10); end
 legend('data', 'prediction', 'error','Location','northwest'); legend('boxoff')
-subplot(size(otData,2),1,2); plot(otData(:,2),'k'); hold on; plot(yData(:,2),'k--'); plot(eData(:,2),'k:'); 
-xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit); 
+subplot(size(otData,2),1,2); plot(otData(:,2),'k'); hold on; plot(yData(:,2),'k--'); plot(yData(:,2),'ko'); plot(eData(:,2),'k:'); 
+xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit);  xlim([0 size(yData,1)])
 if nargin > 3; plot(idx.CV,eCV(:,2),'bx','MarkerSize',10); end
-subplot(size(otData,2),1,3); plot(otData(:,3),'k'); hold on; plot(yData(:,3),'k--'); plot(eData(:,3),'k:'); 
+subplot(size(otData,2),1,3); plot(otData(:,3),'k'); hold on; plot(yData(:,3),'k--'); plot(yData(:,3),'ko'); plot(eData(:,3),'k:'); 
 if nargin > 2 
-    if isfield(param,'predskip'); hold on; plot(param.predskip(:,2:3),'k--','LineWidth',3); xline(find(~param.predskip(:,1)),'LineWidth',3); hold off
+    if isfield(param,'predskip'); hold on; plot(param.predskip(:,2:3),'k--','LineWidth',3); hold off
     elseif isfield(param,'endExp'); yline(param.endExp,'k-.','end expiration','LineWidth',3); end
 end
-xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit); 
+xlabel('Time (s)'); ylabel('dZ (mm)'); grid('on'); ylim(ylimit);  xlim([0 size(yData,1)])
 if nargin > 3; plot(idx.CV,eCV(:,3),'bx','MarkerSize',10); end
 if nargin > 3
     err_train = 10 * log10(sum(eData(idx.Train,:).^2,'all','omitnan') / sum(otData(idx.Train,:).^2,'all','omitnan'));
