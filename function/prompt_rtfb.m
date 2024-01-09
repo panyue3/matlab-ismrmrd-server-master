@@ -71,8 +71,8 @@ classdef prompt_rtfb < handle
                 ecgGroup = cell(1,ntClip*10); % ismrmrd.Waveform;
             else
                 imgGroup = cell(1,nImg); % ismrmrd.Image;
-                ptGroup = cell(1,1.2*nTrigs*200*(sysFreeMax+1)); % ismrmrd.Waveform;
-                ecgGroup = cell(1,1.2*nTrigs*10); % ismrmrd.Waveform;
+                ptGroup = cell(1,round(1.2*nTrigs*200*(sysFreeMax+1))); % ismrmrd.Waveform;
+                ecgGroup = cell(1,round(1.2*nTrigs*10)); % ismrmrd.Waveform;
             end
             imgCounter = 0;
             ptCounter = 0;

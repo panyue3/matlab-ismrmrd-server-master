@@ -38,8 +38,8 @@ classdef prompt_calibrate < handle
             nTrigs = metadata.encoding.encodingLimits.repetition.maximum+1;
             nImg = (metadata.encoding.encodingLimits.slice.maximum+1) * nTrigs;
             imgGroup = cell(1,nImg); % ismrmrd.Image;
-            ptGroup = cell(1,1.2*nTrigs*200*(sysFreeMax+1)); % ismrmrd.Waveform;
-            ecgGroup = cell(1,1.2*nTrigs*10); % ismrmrd.Waveform;
+            ptGroup = cell(1,round(1.2*nTrigs*200*(sysFreeMax+1))); % ismrmrd.Waveform;
+            ecgGroup = cell(1,round(1.2*nTrigs*10)); % ismrmrd.Waveform;
             imgCounter = 0;
             ptCounter = 0;
             ecgCounter = 0;
