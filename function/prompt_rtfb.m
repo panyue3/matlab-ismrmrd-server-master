@@ -126,7 +126,7 @@ classdef prompt_rtfb < handle
                                     ptGroup{numel(ptGroup)+0.3*nTrigs*200} = [];
                                 end
                             end
-                            if ptCounter ==1
+                            if ptCounter == 1
                                 param.startTime = ptGroup{1}.head.time_stamp;
                             end
                         elseif (sysFreeMax && item.head.waveform_id == 3) || (~sysFreeMax && item.head.waveform_id == 0)    % -------------------------------------- ECG waveform

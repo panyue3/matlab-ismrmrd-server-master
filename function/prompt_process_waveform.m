@@ -38,8 +38,9 @@ ecgdata.medianRR =  median(diff(ecgdata.time(ecgdata.trigger)));
 nReps = metadata.encoding.encodingLimits.repetition.maximum+1;
 if nReps ~= sum(ecgdata.trigger)
     logging.debug('Trigger number and images received did not match, # reps: %i, # trigs: %i', nReps, sum(ecgdata.trigger))
+    tr = (metadata.encoding.encodingLimits.slice.maximum+1) * (metadata.sequenceParameters.TR) / 1000;
     t_fst_rf = ptdata.rawtime(~ptdata.isvalid);
-    t_fst_rf = [t_fst_rf(1); t_fst_rf([0; diff(t_fst_rf)] > 0.5*ecgdata.medianRR)];
+    t_fst_rf = [t_fst_rf(1); t_fst_rf([0; diff(t_fst_rf)] > 0.5*(ecgdata.medianRR-tr))];
 
     if nReps < sum(ecgdata.trigger) % extra trigger
         t_trigs = ecgdata.time(ecgdata.trigger);

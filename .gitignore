@@ -1,7 +1,6 @@
 *.DS_Store
 *.asv
 *.m~
-*.mex*
 *.class
 *octave-workspace
 *.log

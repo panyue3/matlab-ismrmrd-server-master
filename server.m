@@ -72,8 +72,22 @@ classdef server < handle
                     obj.log.info("Starting prompt processing based on config")
                     if metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTcalibrate'))).value
                         recon = prompt_calibrate;
-                    else
+                    elseif ispc || logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value)
                         recon = prompt_rtfb;
+                    else % Dummy loop with no processing
+                        try
+                            while true
+                                item = next(conn);
+                                if isempty(item)
+                                    break;
+                                end
+                            end
+                            conn.send_close();
+                        catch
+                            conn.send_close();
+                        end
+                        % Dummy function for below as we already processed the data
+                        recon = @(conn, config, meta, log) (true);
                     end
                 elseif strcmpi(config, "getpmu")
                     obj.log.info("Starting invertcontrast processing based on config")
