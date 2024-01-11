@@ -12,7 +12,7 @@ fig = figure;
 subplot(size(otData,2),1,1); plot(otData(:,1),'k'); hold on; plot(yData(:,1),'k--'); plot(yData(:,1),'ko'); plot(eData(:,1),'k:'); 
 xlabel('Time (s)'); ylabel('dX (mm)'); grid('on'); ylim(ylimit);  xlim([0 size(yData,1)])
 if nargin > 3; plot(idx.CV,eCV(:,1),'bx','MarkerSize',10); end
-legend('data', 'prediction', 'error','Location','northwest'); legend('boxoff')
+legend('data', 'prediction', '','error','Location','northwest'); legend('boxoff')
 subplot(size(otData,2),1,2); plot(otData(:,2),'k'); hold on; plot(yData(:,2),'k--'); plot(yData(:,2),'ko'); plot(eData(:,2),'k:'); 
 xlabel('Time (s)'); ylabel('dY (mm)'); grid('on'); ylim(ylimit);  xlim([0 size(yData,1)])
 if nargin > 3; plot(idx.CV,eCV(:,2),'bx','MarkerSize',10); end

@@ -3,6 +3,7 @@ function imdata = calculateImageShift(group, metadata, logging, ref)
 % Set MOCO parameters
 moco = 1; % MOCO method: 1 - Siemens, 2 - Demon, 3 - Normalized Cross Correlation
 param.mocoReg = 12;
+cropfactor = 4;
 Options.SigmaFluid = 5;
 Options.SigmaDiff = 1;
 Options.Interpolation = 'Cubic';
@@ -69,7 +70,7 @@ if nargin > 3
 end
 
 % Run MOCO
-rectSer = centerCropWindow2d(size(imAll,[1 2]),round(size(imAll,[1 2])/3));
+rectSer = centerCropWindow2d(size(imAll,[1 2]),round(size(imAll,[1 2])/cropfactor));
 imDisp = nan(nRep,3,nOri);
 % nmse = nan(nRep,nOri);
 ssimval = nan(nRep,nOri);
@@ -100,7 +101,7 @@ for iOri = 1:nOri
                         [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
 
                     case 2
-                        Dx_crop = zeros([round(size(imAll,[1 2])/3),11]);
+                        Dx_crop = zeros([round(size(imAll,[1 2])/cropfactor),11]);
                         parfor ii = 1:11
                             [~, ~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
                             Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
@@ -113,7 +114,7 @@ for iOri = 1:nOri
                         parfor ii = 1:11
                             BSer_interp(:,:,ii) = interp2(x, y, BSer(:,:,ii+1), xq, yq,'spline');
                         end
-                        rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/3));
+                        rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/cropfactor));
                         ref_interp = imcrop(BSer_interp(:,:,5),rectSer_interp);
                         parfor ii = 1:11
                             cross_corr = normxcorr2(ref_interp,BSer_interp(:,:,ii));
@@ -134,7 +135,7 @@ for iOri = 1:nOri
                         [~, idx] = max(squeeze(mean(Dx_crop, [1,2]))* single(rotMatrix(zOri,3)));
 
                     case 2
-                        Dx_crop = zeros([round(size(imAll,[1 2])/3),11]);
+                        Dx_crop = zeros([round(size(imAll,[1 2])/cropfactor),11]);
                         parfor ii = 1:11
                             [~, Dx] = register_images(BSer(:,:,ii+1), BSer(:,:,6), Options);
                             Dx_crop(:,:,ii) = imcrop(Dx,rectSer);
@@ -147,7 +148,7 @@ for iOri = 1:nOri
                         parfor ii = 1:11
                             BSer_interp(:,:,ii) = interp2(x, y, BSer(:,:,ii+1), xq, yq,'spline');
                         end
-                        rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/3));
+                        rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/cropfactor));
                         ref_interp = imcrop(BSer_interp(:,:,5),rectSer_interp);
                         parfor ii = 1:11
                             cross_corr = normxcorr2(ref_interp,BSer_interp(:,:,ii));
@@ -189,8 +190,8 @@ for iOri = 1:nOri
             imDisp(:,:,iOri) = [squeeze(mean(mean(Dy_Ser_crop,1),2))*szPix(1), squeeze(mean(mean(Dx_Ser_crop,1),2))*szPix(2)] * single(rotMatrix);
 
         case 2
-            Dx_Ser_crop = nan([round(size(BSer,[1 2])/3),nRep]);
-            Dy_Ser_crop = nan([round(size(BSer,[1 2])/3),nRep]);
+            Dx_Ser_crop = nan([round(size(BSer,[1 2])/cropfactor),nRep]);
+            Dy_Ser_crop = nan([round(size(BSer,[1 2])/cropfactor),nRep]);
             Icomb = nan(size(BSer,1),size(BSer,2)*2,nRep);
             parfor iRep = 1:nRep
                 logging.info("Estimating motion for frame %i/%i ", iRep, nRep)
@@ -212,7 +213,7 @@ for iOri = 1:nOri
             parfor iRep = 1:size(BSer,3)
                 BSer_interp(:,:,iRep) = interp2(x, y, BSer(:,:,iRep), xq, yq,'spline');
             end
-            rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/3));
+            rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/cropfactor));
             Iref = imcrop(BSer_interp(:,:,idx),rectSer_interp);
             parfor iRep = 1:size(BSer,3)
                 cross_corr = normxcorr2(Iref,BSer_interp(:,:,iRep));

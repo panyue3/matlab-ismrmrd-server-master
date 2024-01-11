@@ -167,7 +167,7 @@ classdef prompt_rtfb < handle
                                     % =========== For Phantom Test Only =========== %
 
                                     % update param.endExp to accommodate respiratory shift
-                                    if shiftvector(3) > param.endExp  && any(predshift(max([1,end-19]):end,3)>param.endExp)
+                                    if shiftvector(3) > (param.endExp+gateWindow/2) && any(predshift(max([1,end-19]):end,3)>(param.endExp+gateWindow/2))
                                         param.endExp = shiftvector(3);
                                     elseif size(predskip,1) > 19 && sum(predskip(end-19:end,1)) == 20
                                         param.endExp = max(predshift(end-19:end,3));
