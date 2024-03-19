@@ -262,7 +262,7 @@ classdef prompt_kwfilter < handle
                         connection.send_image(image);
                     else
                         save(filename,'predshift', 'predskip');
-                        if ~sendRTFB
+                        if ~sendRTFB  && ~isunix
                             image = prompt_plot_predict([], predshift, param, info, metadata, logging);
                             logging.debug("Sending predict image to client");
                             connection.send_image(image);
