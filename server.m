@@ -68,29 +68,35 @@ classdef server < handle
 
                 % Decide what program to use based on config
                 % As a shortcut, we accept the file name as text too.
+                % ------------------------------------------------------- prompt ---------------------------------------------------------- %
                 if strcmpi(config, "prompt")
                     obj.log.info("Starting prompt processing based on config")
                     if metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTcalibrate'))).value
                         recon = prompt_calibrate;
-                    elseif ispc || logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value)
-                        recon = prompt_rtfb;
-                    else % Dummy loop with no processing
-                        try
-                            while true
-                                item = next(conn);
-                                if isempty(item)
-                                    break;
+                    else
+                        if logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'KWfilter'))).value)
+                            recon = prompt_kwfilter;
+                        elseif ispc || logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value)
+                            recon = prompt_rtfb;
+                        else % Dummy loop with no processing
+                            try
+                                while true
+                                    item = next(conn);
+                                    if isempty(item)
+                                        break;
+                                    end
                                 end
+                                conn.send_close();
+                            catch
+                                conn.send_close();
                             end
-                            conn.send_close();
-                        catch
-                            conn.send_close();
+                            % Dummy function for below as we already processed the data
+                            recon = @(conn, config, meta, log) (true);
                         end
-                        % Dummy function for below as we already processed the data
-                        recon = @(conn, config, meta, log) (true);
                     end
+                % ------------------------------------------------------- prompt ---------------------------------------------------------- %
                 elseif strcmpi(config, "getpmu")
-                    obj.log.info("Starting invertcontrast processing based on config")
+                    obj.log.info("Starting getpmu processing based on config")
                     recon = getpmu;
                 elseif strcmpi(config, "invertcontrast")
                     obj.log.info("Starting invertcontrast processing based on config")

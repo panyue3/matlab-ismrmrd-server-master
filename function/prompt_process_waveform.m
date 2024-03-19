@@ -47,7 +47,7 @@ if nReps ~= sum(ecgdata.trigger)
         time_mx = t_fst_rf - t_trigs.';
         time_mx(time_mx<0) = nan;
         t_delay= round(min(time_mx, [], 1,'omitnan'), 2);
-        logging.debug('Deleting %i trigger.', sum(t_delay ~= mode(t_delay)))
+        logging.debug('Deleting %i trigger.', sum(t_delay - mode(t_delay) > 0.025))
         ecgdata.trigger(ecgdata.time == t_trigs(t_delay ~= mode(t_delay))) = false;
     end
 

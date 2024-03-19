@@ -1,4 +1,4 @@
-classdef prompt_rtfb < handle
+classdef prompt_kwfilter < handle
     methods
         %% PROCESS
         function process(obj, connection, config, metadata, logging)
@@ -66,14 +66,13 @@ classdef prompt_rtfb < handle
             predshift = []; 
             predskip = [];
             if sendRTFB
-                imgGroup = cell(1,0); % ismrmrd.Image;
                 ptGroup = cell(1,ntClip*200*(sysFreeMax+1)); % ismrmrd.Waveform;
                 ecgGroup = cell(1,ntClip*10); % ismrmrd.Waveform;
             else
-                imgGroup = cell(1,nImg); % ismrmrd.Image;
                 ptGroup = cell(1,round(1.2*nTrigs*200*(sysFreeMax+1))); % ismrmrd.Waveform;
                 ecgGroup = cell(1,round(1.2*nTrigs*10)); % ismrmrd.Waveform;
             end
+            imgGroup = cell(1,nImg); % ismrmrd.Image;
             imgCounter = 0;
             ptCounter = 0;
             ecgCounter = 0;
@@ -95,10 +94,8 @@ classdef prompt_rtfb < handle
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
                         if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
-                            if ~sendRTFB
-                                imgCounter = imgCounter+1;
-                                imgGroup{imgCounter} = item;
-                            end
+                            imgCounter = imgCounter+1;
+                            imgGroup{imgCounter} = item;
                             if ~exist('info','var')
                                 % Save header info for image generation
                                 info.head = item.head;
@@ -221,14 +218,13 @@ classdef prompt_rtfb < handle
                 % ----------------------------------------------------------
                 % Image data group
                 % ----------------------------------------------------------
-                if ~isempty(imgGroup)
+                if ~isempty(imgGroup)                
                     if ~sendRTFB && ~isempty(imgGroup{1})
                         logging.info("Processing a group of images (untriggered)")
                         [image, imdata] = prompt_process_images(imgGroup(1:imgCounter), metadata, logging, ref);
                         logging.debug("Sending image to client");
                         connection.send_image(image);
                     end
-                    imgGroup = cell(1,0);
                 end
 
                 % ----------------------------------------------------------
@@ -279,6 +275,18 @@ classdef prompt_rtfb < handle
                 else
                     logging.warn("Predicted shift data not found")
                 end
+
+                % ----------------------------------------------------------
+                % KW filtering
+                % ----------------------------------------------------------
+                if ~isempty(imgGroup)
+                    logging.info("Processing a group of images for KW filtering")
+                    image = kwfilter_process_images(imgGroup(1:imgCounter), metadata, logging);
+                    logging.debug("Sending filtered image to client");
+                    connection.send_image(image);
+                    imgGroup = cell(1,0);
+                end
+
             catch ME
                 logging.error(sprintf('%s\nError in %s (line %d)', ME.message, ME.stack(1).('name'), ME.stack(1).('line')));
             end
