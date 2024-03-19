@@ -231,7 +231,7 @@ classdef prompt_kwfilter < handle
                 % Waveform data group
                 % ----------------------------------------------------------
                 if ~isempty(ptGroup) && ~isempty(ecgGroup)
-                    if ~sendRTFB && exist('param','var') && ~isempty(ptGroup{1}) && ~isempty(ecgGroup{1})
+                    if ~sendRTFB && exist('param','var') && ~isempty(ptGroup{1}) && ~isempty(ecgGroup{1}) && ~isunix
                         logging.info("Processing a group of PT data (untriggered)")
                         ptdata = prompt_process_waveform(ptGroup(1:ptCounter), ecgGroup(1:ecgCounter), metadata, logging, param);
                     end
