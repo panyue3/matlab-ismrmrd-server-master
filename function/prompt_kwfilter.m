@@ -219,7 +219,7 @@ classdef prompt_kwfilter < handle
                 % Image data group
                 % ----------------------------------------------------------
                 if ~isempty(imgGroup)                
-                    if ~sendRTFB && ~isempty(imgGroup{1})
+                    if ~sendRTFB && ~isempty(imgGroup{1}) && ~isunix
                         logging.info("Processing a group of images (untriggered)")
                         [image, imdata] = prompt_process_images(imgGroup(1:imgCounter), metadata, logging, ref);
                         logging.debug("Sending image to client");
