@@ -93,9 +93,15 @@ classdef prompt_kwfilter < handle
                     % Image data messages
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
+                        meta = ismrmrd.Meta.deserialize(item.attribute_string);
                         if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
+                            if ~contains(meta.SequenceDescription,'MOCO')
                             imgCounter = imgCounter+1;
                             imgGroup{imgCounter} = item;
+                            elseif contains(meta.SequenceDescription,'AVG')
+                                imgAvg = item;
+                            end
+
                             if ~exist('info','var')
                                 % Save header info for image generation
                                 info.head = item.head;
@@ -284,6 +290,18 @@ classdef prompt_kwfilter < handle
                     image = kwfilter_process_images(imgGroup(1:imgCounter), metadata, logging);
                     logging.debug("Sending filtered image to client");
                     connection.send_image(image);
+
+                    if exist('imgAvg','var')
+                        cData = cellfun(@(x) x.data, imgGroup(1:imgCounter), 'UniformOutput', false);
+                        data = cat(3, cData{:});
+                        imgAvg.data = uint16(mean(data,3));
+                        metaAvg = ismrmrd.Meta.deserialize(imgAvg.attribute_string);
+                        metaAvg = ismrmrd.Meta.appendValue(metaAvg, 'ImageProcessingHistory', 'KW Patch Filter');
+                        metaAvg.SequenceDescription = [metaAvg.SequenceDescription, '_Filtered'];
+                        imgAvg = imgAvg.set_attribute_string(ismrmrd.Meta.serialize(metaAvg));
+                        logging.debug("Sending average image to client");
+                        connection.send_image(imgAvg);
+                    end
                     imgGroup = cell(1,0);
                 end
 
