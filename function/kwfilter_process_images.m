@@ -1,4 +1,4 @@
-function images = kwfilter_process_images(group, metadata, logging)
+function [images, data] = kwfilter_process_images(group, metadata, logging)
 
 % Extract image data
 cData = cellfun(@(x) x.data, group, 'UniformOutput', false);

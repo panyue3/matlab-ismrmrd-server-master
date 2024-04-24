@@ -28,6 +28,11 @@ classdef prompt_kwfilter < handle
                 mkdir('/tmp/share/prompt')
             end
 
+            % Check config parameters
+            sysFreeMax = contains(metadata.acquisitionSystemInformation.systemModel,'Free.Max','IgnoreCase',true);
+            sendRTFB = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value);
+            runMOCO = metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'MOCO'))).value;
+
             % Load training result. If multiple training was done, read in the last file generated
             tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
             filename = sprintf("train_%s.*.mat", tmp{11});
@@ -42,9 +47,13 @@ classdef prompt_kwfilter < handle
             else
                 [~,idx] = sort([trainlist.datenum]);
                 trainlist = trainlist(idx);
-                load(fullfile(trainlist(end).folder,trainlist(end).name), 'net', 'param', 'imdata')
-                ref.refIma = imdata.refIma; ref.isFlip = imdata.isFlip;
-                clear imdata
+                if sendRTFB
+                    load(fullfile(trainlist(end).folder,trainlist(end).name), 'net', 'param')
+                else
+                    load(fullfile(trainlist(end).folder,trainlist(end).name), 'net', 'param', 'imdata')
+                    ref.refIma = imdata.refIma; ref.isFlip = imdata.isFlip;
+                    clear imdata
+                end
 
                 % Check if coils match training series
                 coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
@@ -57,11 +66,13 @@ classdef prompt_kwfilter < handle
             end
 
             % Init variables
-            sysFreeMax = contains(metadata.acquisitionSystemInformation.systemModel,'Free.Max','IgnoreCase',true);
-            sendRTFB = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value);
             gateWindow = metadata.userParameters.userParameterDouble(find(strcmp({metadata.userParameters.userParameterDouble.name}, 'PTgateWindow'))).value;
-            nTrigs = metadata.encoding.encodingLimits.repetition.maximum+1;
-            nImg = (metadata.encoding.encodingLimits.slice.maximum+1) * nTrigs;
+            if ~gateWindow
+                gateWindow = param.defaultWin;
+                logging.info("Gating window is not set, usiong default %0.1f mm.", gateWindow)
+            end
+            nTrigs = (metadata.encoding.encodingLimits.average.maximum+1)*(metadata.encoding.encodingLimits.repetition.maximum+1);
+            nImg = (metadata.encoding.encodingLimits.slice.maximum+1) * nTrigs; % NEED TO MODIFY IF SLICES ARE NOT CONCATED
             ntClip = 11;
             predshift = []; 
             predskip = [];
@@ -77,6 +88,12 @@ classdef prompt_kwfilter < handle
             ptCounter = 0;
             ecgCounter = 0;
             last_trig = 0;
+
+            if sendRTFB     % pre-sending realtime feedback
+                feedbackData = PTshiftFBData(zeros(1,3), true, logging);
+                logging.debug("Collecting PT data, dX: NaN, dY: NaN, dZ: NaN. Skip: true.")
+                connection.send_feedback('PTShift', feedbackData);
+            end
 
 %% Continuously parse incoming data parsed from MRD messages
             try
@@ -94,18 +111,15 @@ classdef prompt_kwfilter < handle
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
                         meta = ismrmrd.Meta.deserialize(item.attribute_string);
-                        if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
+                        if ~exist('info','var')
+                            % Save header info for image generation
+                            info.head = item.head;
+                            info.attribute_string = item.attribute_string;
+                        end
+                        if (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)                            
                             if ~contains(meta.SequenceDescription,'MOCO')
-                            imgCounter = imgCounter+1;
-                            imgGroup{imgCounter} = item;
-                            elseif contains(meta.SequenceDescription,'AVG')
-                                imgAvg = item;
-                            end
-
-                            if ~exist('info','var')
-                                % Save header info for image generation
-                                info.head = item.head;
-                                info.attribute_string = item.attribute_string;
+                                imgCounter = imgCounter+1;
+                                imgGroup{imgCounter} = item;
                             end
                         end
 
@@ -171,23 +185,27 @@ classdef prompt_kwfilter < handle
 
                                     % update param.endExp to accommodate respiratory shift
                                     if shiftvector(3) > (param.endExp+gateWindow/2) && any(predshift(max([1,end-19]):end,3)>(param.endExp+gateWindow/2))
+                                        logging.info("Changing end expiratory level: %0.2f --> %0.2f", param.endExp, shiftvector(3))
                                         param.endExp = shiftvector(3);
+                                        save(fullfile(trainlist(end).folder,trainlist(end).name), 'param','-append')
                                     elseif size(predskip,1) > 19 && sum(predskip(end-19:end,1)) == 20
+                                        logging.info("Changing end expiratory level: %0.2f --> %0.2f", param.endExp, max(predshift(end-19:end,3)))
                                         param.endExp = max(predshift(end-19:end,3));
+                                        save(fullfile(trainlist(end).folder,trainlist(end).name), 'param','-append')
                                     end
-                                    param.gate = [param.endExp-gateWindow/2, param.endExp+gateWindow/2];
+                                    gateRange = [param.endExp-gateWindow/2, param.endExp+gateWindow/2];
 
-                                    isSkipAcq = logical(shiftvector(3) > param.gate(2) || shiftvector(3) < param.gate(1));
+                                    isSkipAcq = logical(shiftvector(3) > gateRange(2) || shiftvector(3) < gateRange(1));
                                     predshift(end+1,:) = shiftvector;
-                                    predskip(end+1,:) = [double(isSkipAcq), param.gate];
+                                    predskip(end+1,:) = [double(isSkipAcq), gateRange];
                                     feedbackData = PTshiftFBData(shiftvector, isSkipAcq, logging);
                                     %feedbackData = PTshiftFBData([0 0 shiftvector(3)], isSkipAcq, logging);
                                     logging.debug("Predicted shift dX: %.6f, dY: %.6f, dZ: %.6f. Skip: %i. -- Time used: %.3f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), isSkipAcq, elapsedTime)
 
                                 else % PT samples not sufficient for prediction
-                                    param.gate = [param.endExp-gateWindow/2, param.endExp+gateWindow/2];
+                                    gateRange = [param.endExp-gateWindow/2, param.endExp+gateWindow/2];
                                     predshift(end+1,:) = nan(1,3);
-                                    predskip(end+1,:) = [1, param.gate];
+                                    predskip(end+1,:) = [1, gateRange];
                                     feedbackData = PTshiftFBData(zeros(1,3), true, logging);
                                     logging.debug("Collecting PT data, dX: NaN, dY: NaN, dZ: NaN. Skip: true.")
 
@@ -221,10 +239,20 @@ classdef prompt_kwfilter < handle
                     load(fullfile(trainlist(end).folder,trainlist(end).name), 'info')
                 end
 
+                pks = findpeaks(predshift(:,3));
+                if numel(pks) > 3
+                    newEndExp = median(pks);
+                    if newEndExp < param.endExp && (param.endExp-newEndExp) < 1.5
+                        logging.info("New end expiratory level computed: %0.2f --> %0.2f", param.endExp, newEndExp)
+                        param.endExp =newEndExp;
+                        save(fullfile(trainlist(end).folder,trainlist(end).name), 'param','-append')
+                    end
+                end
+
                 % ----------------------------------------------------------
                 % Image data group
                 % ----------------------------------------------------------
-                if ~isempty(imgGroup)                
+                if ~isempty(imgGroup)
                     if ~sendRTFB && ~isempty(imgGroup{1}) && ~isunix
                         logging.info("Processing a group of images (untriggered)")
                         [image, imdata] = prompt_process_images(imgGroup(1:imgCounter), metadata, logging, ref);
@@ -268,7 +296,7 @@ classdef prompt_kwfilter < handle
                         connection.send_image(image);
                     else
                         save(filename,'predshift', 'predskip');
-                        if ~sendRTFB  && ~isunix
+                        if ~sendRTFB && ~isunix
                             image = prompt_plot_predict([], predshift, param, info, metadata, logging);
                             logging.debug("Sending predict image to client");
                             connection.send_image(image);
@@ -286,21 +314,39 @@ classdef prompt_kwfilter < handle
                 % KW filtering
                 % ----------------------------------------------------------
                 if ~isempty(imgGroup)
-                    logging.info("Processing a group of images for KW filtering")
-                    image = kwfilter_process_images(imgGroup(1:imgCounter), metadata, logging);
-                    logging.debug("Sending filtered image to client");
+                    logging.info("Processing a group of image for KW filtering")
+                    [image, data] = kwfilter_process_images(imgGroup(1:imgCounter), metadata, logging);
+                    logging.debug("Sending filtered images to client");
                     connection.send_image(image);
 
-                    if exist('imgAvg','var')
-                        cData = cellfun(@(x) x.data, imgGroup(1:imgCounter), 'UniformOutput', false);
-                        data = cat(3, cData{:});
-                        imgAvg.data = uint16(mean(data,3));
-                        metaAvg = ismrmrd.Meta.deserialize(imgAvg.attribute_string);
-                        metaAvg = ismrmrd.Meta.appendValue(metaAvg, 'ImageProcessingHistory', 'KW Patch Filter');
-                        metaAvg.SequenceDescription = [metaAvg.SequenceDescription, '_Filtered'];
-                        imgAvg = imgAvg.set_attribute_string(ismrmrd.Meta.serialize(metaAvg));
-                        logging.debug("Sending average image to client");
-                        connection.send_image(imgAvg);
+                    if runMOCO
+                        [image, data] = mocoRun(data);
+                        logging.debug("Sending MOCO image to client");
+                        connection.send_image(image);
+
+                        numAvg = 2:2:size(data,3);
+                        images = cell(1, numel(numAvg));
+                        for jj=1:numel(numAvg)
+                            avgData = uint16(mean(data(:,:,1:numAvg(jj)),3));
+
+                            % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
+                            image = ismrmrd.Image(avgData);
+
+                            % Copy original image header, but keep the new data_type
+                            data_type = image.head.data_type;
+                            image.head = imgGroup{1}.head;
+                            image.head.data_type = data_type;
+
+                            % Add to ImageProcessingHistory
+                            meta = ismrmrd.Meta.deserialize(imgGroup{find(imgType==numType(ii),1)}.attribute_string);
+                            meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'PROMPT');
+                            meta.SequenceDescription = [meta.SequenceDescription, '_Filtered_MOCO_AVG'];
+                            image = image.set_attribute_string(ismrmrd.Meta.serialize(meta));
+
+                            images{jj} = image;
+                        end
+                        logging.debug("Sending averaged image to client");
+                        connection.send_image(images);
                     end
                     imgGroup = cell(1,0);
                 end

@@ -33,6 +33,33 @@ classdef prompt_calibrate < handle
                 parpool('local','SpmdEnabled',false)
             end
 
+            % Check if training already done before
+            netPretrained = false;
+            tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
+            filename = sprintf("train_%s.*.mat", tmp{11});
+            if ispc
+                trainlist = dir(fullfile(pwd,'output',filename));
+            elseif isunix
+                trainlist = dir(fullfile('/tmp/share/prompt',filename));
+            end
+
+            if ~isempty(trainlist)
+                [~,idx] = sort([trainlist.datenum]);
+                trainlist = trainlist(idx);
+                load(fullfile(trainlist(end).folder,trainlist(end).name), 'net', 'param')
+
+                % Check if coils match training series
+                coils = {metadata.acquisitionSystemInformation.coilLabel.coilName}';
+                [~, idx] = sort(coils);
+                coils = coils(idx);
+                if ~matches(cell2str(coils),cell2str(param.coils),"IgnoreCase",true)
+                    logging.info("Receiver coils turned on do not match the training series. Retrain network.")
+                    delete net param
+                else
+                    netPretrained = true;
+                end
+            end
+
             % Init variables
             sysFreeMax = contains(metadata.acquisitionSystemInformation.systemModel,'Free.Max','IgnoreCase',true);
             nTrigs = metadata.encoding.encodingLimits.repetition.maximum+1;
@@ -131,6 +158,10 @@ classdef prompt_calibrate < handle
                 % Train network
                 % ----------------------------------------------------------
                 if exist('imdata','var') && exist('ptdata','var')
+                    if netPretrained
+                        ptdata.net = net;
+                        ptdata.param.nSecs = param.nSecs;
+                    end
                     image = prompt_train_network(imdata, ptdata, info, metadata, logging);
                     logging.debug("Sending image to client");
                     connection.send_image(image);

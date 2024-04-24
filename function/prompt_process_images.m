@@ -9,6 +9,7 @@ end
 
 % Find end expiratory
 imdata.endExp = median(findpeaks(imdata.shiftvec(:,3)));
+imdata.respRange = round(imdata.endExp + median(findpeaks(-imdata.shiftvec(:,3))),1);
 logging.info('Training end expiratory amplitude: %.2f.', imdata.endExp)
 
 % Pack cropped reference images
