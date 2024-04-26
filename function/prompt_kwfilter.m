@@ -89,12 +89,6 @@ classdef prompt_kwfilter < handle
             ecgCounter = 0;
             last_trig = 0;
 
-            if sendRTFB     % pre-sending realtime feedback
-                feedbackData = PTshiftFBData(zeros(1,3), true, logging);
-                logging.debug("Collecting PT data, dX: NaN, dY: NaN, dZ: NaN. Skip: true.")
-                connection.send_feedback('PTShift', feedbackData);
-            end
-
 %% Continuously parse incoming data parsed from MRD messages
             try
                 while true
