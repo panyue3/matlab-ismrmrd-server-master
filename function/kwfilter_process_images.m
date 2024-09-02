@@ -88,6 +88,6 @@ for i=1:size(data,3)
 end
 
 logging.info('Save data with slice poition ...')
-save(['output\Temp_Data_0', datestr(now, 'yyyy_mm_dd_HH_MM_SS'), '.mat'], 'data_0', 'a_f', 'v_0', 'v_re', 'b', 'J', 'images', 'metadata', 'option')
+save(fullfile(pwd,'output',['Temp_Data_0', datestr(now, 'yyyy_mm_dd_HH_MM_SS'), '.mat']), 'data_0', 'a_f', 'v_0', 'v_re', 'b', 'J', 'images', 'metadata', 'option')
 
 end

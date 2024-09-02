@@ -1,4 +1,4 @@
-classdef prompt_rtfb < handle
+classdef prompt_map < handle
     methods
         %% PROCESS
         function process(obj, connection, config, metadata, logging)
@@ -31,7 +31,6 @@ classdef prompt_rtfb < handle
             % Check config parameters
             sysFreeMax = contains(metadata.acquisitionSystemInformation.systemModel,'Free.Max','IgnoreCase',true);
             sendRTFB = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value);
-            runMOCO = metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'MOCO'))).value;
 
             if sendRTFB
                 % Send feedback once to open the connection
@@ -82,16 +81,10 @@ classdef prompt_rtfb < handle
                 logging.info("Gating window is not set, usiong default %0.1f mm.", gateWindow)
             end
             nTrigs = (metadata.encoding.encodingLimits.average.maximum+1)*(metadata.encoding.encodingLimits.repetition.maximum+1)*(metadata.encoding.encodingLimits.set.maximum+1);
-            nImg = (metadata.encoding.encodingLimits.slice.maximum+1) * nTrigs; % NEED TO MODIFY IF SLICES ARE NOT CONCATED
             ntClip = 11;
             predshift = []; 
             predskip = [];
             if sendRTFB
-                if runMOCO
-                    imgGroup = cell(1,nImg); % ismrmrd.Image;
-                else
-                    imgGroup = cell(1,0); % ismrmrd.Image;
-                end
                 ptGroup = cell(1,ntClip*200*(sysFreeMax+1)); % ismrmrd.Waveform;
                 ecgGroup = cell(1,ntClip*10); % ismrmrd.Waveform;
 
@@ -101,10 +94,10 @@ classdef prompt_rtfb < handle
                 elapsedTime = toc;
                 logging.debug("Initiate prediction. -- Time used: %.3f.", elapsedTime)
             else
-                imgGroup = cell(1,nImg); % ismrmrd.Image;
                 ptGroup = cell(1,round(1.2*nTrigs*200*(sysFreeMax+1))); % ismrmrd.Waveform;
                 ecgGroup = cell(1,round(1.2*nTrigs*10)); % ismrmrd.Waveform;
             end
+            imgGroup = cell(1,0); % ismrmrd.Image;
             imgCounter = 0;
             ptCounter = 0;
             ecgCounter = 0;
@@ -124,22 +117,12 @@ classdef prompt_rtfb < handle
                     % Image data messages
                     % ----------------------------------------------------------
                     elseif isa(item, 'ismrmrd.Image')
-                        meta = ismrmrd.Meta.deserialize(item.attribute_string);
                         if ~exist('info','var')
                             % Save header info for image generation
                             info.head = item.head;
                             info.attribute_string = item.attribute_string;
                         end
-                        if  contains(meta.SequenceDescription,'MOCO') && ~contains(meta.SequenceDescription,'AVG')
-                            if ~sendRTFB || runMOCO
-                                imgCounter = imgCounter+1;
-                                imgGroup{imgCounter} = item;
-                            end
-                        end
-%                         if ~sendRTFB && ~isunix && ~contains(meta.SequenceDescription,'MOCO') && (item.head.image_type == item.head.IMAGE_TYPE.MAGNITUDE)
-%                             imgCounter = imgCounter+1;
-%                             imgGroup{imgCounter} = item;
-%                         end
+                        logging.info("Do nothing to image data")
 
                     % ----------------------------------------------------------
                     % Waveform data messages
@@ -274,33 +257,6 @@ classdef prompt_rtfb < handle
                 % Image data group
                 % ----------------------------------------------------------
                 if ~isempty(imgGroup)
-                    if runMOCO && ~isempty(imgGroup{1})
-                        imgType = cell2mat(cellfun(@(x) x.head.image_type, imgGroup(1:imgCounter), 'UniformOutput', false)');
-                        numType = unique(imgType);
-                        for ii = 1:numel(numType)
-                            cData = cellfun(@(x) x.data, imgGroup(imgType==numType(ii)), 'UniformOutput', false);
-
-                            data = cat(3, cData{:});
-                            data = uint16(mean(data,3));
-
-                            % Create MRD Image object, set image data and (matrix_size, channels, and data_type) in header
-                            image = ismrmrd.Image(data);
-
-                            % Copy original image header, but keep the new data_type
-                            data_type = image.head.data_type;
-                            image.head = imgGroup{find(imgType==numType(ii),1)}.head;
-                            image.head.data_type = data_type;
-
-                            % Add to ImageProcessingHistory
-                            meta = ismrmrd.Meta.deserialize(imgGroup{find(imgType==numType(ii),1)}.attribute_string);
-                            meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'PROMPT');
-                            meta.SequenceDescription = [meta.SequenceDescription, '_PROMPT'];
-                            image = image.set_attribute_string(ismrmrd.Meta.serialize(meta));
-
-                            logging.debug("Sending MOCO image to client");
-                            connection.send_image(image);
-                        end
-                    end
                     if ~sendRTFB && ~isempty(imgGroup{1}) && ~isunix
                         logging.info("Processing a group of images (untriggered)")
                         [image, imdata] = prompt_process_images(imgGroup(1:imgCounter), metadata, logging, ref);

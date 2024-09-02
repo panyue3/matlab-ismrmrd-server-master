@@ -34,58 +34,33 @@ ecgdata.time(ecgdata.time==0) = [];
 ecgdata.nSamples = numel(ecgdata.trigger);
 ecgdata.medianRR =  median(diff(ecgdata.time(ecgdata.trigger)));
 
-%{ 
-% save pmu data during retro recon for trigger visualization
-tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
-filename = sprintf("pmudata_%s.%s_%s.mat", tmp{11}, tmp{end}, metadata.measurementInformation.protocolName);
-if ispc
-    filename = fullfile(pwd,'output',filename);
-elseif isunix
-    filename = fullfile('/tmp/share/prompt',filename);
-end
-save(filename,'ptdata', 'ecgdata');
+% Check if trigger number matches measurement number
+nReps = metadata.encoding.encodingLimits.repetition.maximum+1;
+if nReps ~= sum(ecgdata.trigger)
+    logging.debug('Trigger number and images received did not match, # reps: %i, # trigs: %i', nReps, sum(ecgdata.trigger))
+    tr = (metadata.encoding.encodingLimits.slice.maximum+1) * (metadata.sequenceParameters.TR) / 1000;
+    t_fst_rf = ptdata.rawtime(~ptdata.isvalid);
+    t_fst_rf = [t_fst_rf(1); t_fst_rf([0; diff(t_fst_rf)] > 0.5*(ecgdata.medianRR-tr))];
 
-figure
-plot(ptdata.rawtime,real(ptdata.rawdata(:,1)))
-hold on
-xline(ecgdata.time(ecgdata.trigger),'LineWidth',1)
-validtrig = [true; diff(ecgdata.time(ecgdata.trigger)) > 0.5];
-b = find(ecgdata.trigger);
-if sum(~validtrig)
-    xline(ecgdata.time(b(~validtrig)),'r','LineWidth',1)
-end
-%}
+    if nReps < sum(ecgdata.trigger) % extra trigger
+        t_trigs = ecgdata.time(ecgdata.trigger);
+        time_mx = t_fst_rf - t_trigs.';
+        time_mx(time_mx<0) = nan;
+        t_delay= round(min(time_mx, [], 1,'omitnan'), 2);
+        logging.debug('Deleting %i trigger.', sum(t_delay - mode(t_delay) > 0.025))
+        ecgdata.trigger(ecgdata.time == t_trigs(t_delay ~= mode(t_delay))) = false;
+    end
 
-% Check if trigger number matches measurement number, only performed for calibraiton datasets.
-if runTraining
-    nReps = metadata.encoding.encodingLimits.repetition.maximum+1;
-    if nReps ~= sum(ecgdata.trigger)
-        logging.debug('Trigger number and images received did not match, # reps: %i, # trigs: %i', nReps, sum(ecgdata.trigger))
-        tr = (metadata.encoding.encodingLimits.slice.maximum+1) * (metadata.sequenceParameters.TR) / 1000;
-        tdelay_setting = metadata.userParameters.userParameterDouble(find(strcmp({metadata.userParameters.userParameterDouble.name}, 'ECGTriggerDelay_ms'))).value/1000;
-        t_fst_rf = ptdata.rawtime(~ptdata.isvalid);
-        t_fst_rf = [t_fst_rf(diff([0; t_fst_rf]) > tr)];
-
-        if nReps < sum(ecgdata.trigger) % extra trigger
-            t_trigs = ecgdata.time(ecgdata.trigger);
-            time_mx = t_fst_rf - t_trigs.';
-            time_mx(time_mx<0) = nan;
-            t_delay= round(min(time_mx, [], 1,'omitnan'), 2);
-            logging.debug('Deleting %i trigger.', sum(t_delay - tdelay_setting > 0.025))
-            ecgdata.trigger(ismember(ecgdata.time, t_trigs(t_delay - tdelay_setting > 0.025))) = false;
-        end
-
-        if nReps > sum(ecgdata.trigger) % missing trigger
-            t_trigs = ecgdata.time(ecgdata.trigger);
-            time_mx = t_fst_rf - t_trigs.';
-            time_mx(time_mx<0) = nan;
-            t_delay = round(min(time_mx, [], 2,'omitnan'), 2);
-            misIdx = find(t_delay~=tdelay_setting);
-            logging.debug('Inserting %i trigger.', numel(misIdx))
-            for ii=1:numel(misIdx)
-                [~,idx] = min(abs(ecgdata.time - (t_fst_rf(misIdx(ii))-median(min(time_mx, [], 2,'omitnan')))));
-                ecgdata.trigger(idx) = true;
-            end
+    if nReps > sum(ecgdata.trigger) % missing trigger
+        t_trigs = ecgdata.time(ecgdata.trigger);
+        time_mx = t_fst_rf - t_trigs.';
+        time_mx(time_mx<0) = nan;
+        t_delay = round(min(time_mx, [], 2,'omitnan'), 2);
+        misIdx = find(t_delay~=mode(t_delay));
+        logging.debug('Inserting %i trigger.', numel(misIdx))
+        for ii=1:numel(misIdx)
+            [~,idx] = min(abs(ecgdata.time - (t_fst_rf(misIdx(ii))-median(min(time_mx, [], 2,'omitnan')))));
+            ecgdata.trigger(idx) = true;
         end
     end
 end

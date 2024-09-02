@@ -2,9 +2,9 @@ function [image, imdata] = prompt_process_images(group, metadata, logging, ref)
 
 % Calculate image shift
 if nargin < 4
-    imdata  = calculateImageShift(group, metadata, logging);
+    [imdata, Ireg]  = calculateImageShift(group, metadata, logging);
 else
-    imdata  = calculateImageShift(group, metadata, logging, ref);
+    [imdata, Ireg] = calculateImageShift(group, metadata, logging, ref);
 end
 
 % Find end expiratory
@@ -13,25 +13,28 @@ imdata.respRange = round(imdata.endExp + median(findpeaks(-imdata.shiftvec(:,3))
 logging.info('Training end expiratory amplitude: %.2f.', imdata.endExp)
 
 % Pack cropped reference images
-for ii = 1:size(imdata.ref_crop,3)
-    if imdata.isFlip(ii)
-        ima = ismrmrd.Image(transpose(single(imdata.ref_crop(:,:,ii))));
-    else
-        ima = ismrmrd.Image(single(imdata.ref_crop(:,:,ii)));
+image{size(Ireg,3)*size(Ireg,4)} = ismrmrd.Image;
+for ii = 1:(metadata.encoding.encodingLimits.slice.maximum + 1)
+    for jj = 1:(metadata.encoding.encodingLimits.repetition.maximum + 1)
+        if imdata.isFlip(ii)
+            ima = ismrmrd.Image(transpose(single(Ireg(:,:,jj,ii))));
+        else
+            ima = ismrmrd.Image(single(Ireg(:,:,jj,ii)));
+        end
+
+        % Copy original image header, but keep the new data_type
+        data_type = ima.head.data_type;
+        ima.head = group{ii}.head;
+        ima.head.data_type = data_type;
+        ima.head.field_of_view = group{ii}.head.field_of_view;
+        ima.head.matrix_size = size(ima.data, [1 2 3]);
+
+        % Add to ImageProcessingHistory
+        meta = ismrmrd.Meta.deserialize(group{ii}.attribute_string);
+        meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'PROMPT');
+        ima = ima.set_attribute_string(ismrmrd.Meta.serialize(meta));
+        image{jj+(ii-1)*(metadata.encoding.encodingLimits.repetition.maximum + 1)} = ima;
     end
-
-    % Copy original image header, but keep the new data_type
-    data_type = ima.head.data_type;
-    ima.head = group{ii}.head;
-    ima.head.data_type = data_type;
-    ima.head.field_of_view = [group{ii}.head.field_of_view(1:2)./3, group{ii}.head.field_of_view(3)];
-    ima.head.matrix_size = size(ima.data, [1 2 3]);
-
-    % Add to ImageProcessingHistory
-    meta = ismrmrd.Meta.deserialize(group{ii}.attribute_string);
-    meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'PROMPT');
-    ima = ima.set_attribute_string(ismrmrd.Meta.serialize(meta));
-    image{ii} = ima;
 end
 
 % Save figure to output folder

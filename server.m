@@ -94,7 +94,11 @@ classdef server < handle
                             recon = @(conn, config, meta, log) (true);
                         end
                     end
-                % ------------------------------------------------------- prompt ---------------------------------------------------------- %
+                % --------------------------------------------------- prompt_map ------------------------------------------------------- %
+                elseif strcmpi(config, "prompt_map")
+                    obj.log.info("Starting prompt_map processing based on config")
+                    recon = prompt_map;
+                % ------------------------------------------------------------------------------------------------------------------------- %
                 elseif strcmpi(config, "getpmu")
                     obj.log.info("Starting getpmu processing based on config")
                     recon = getpmu;
@@ -131,7 +135,11 @@ classdef server < handle
                 recon.process(conn, config, metadata, obj.log);
 
             catch ME
-                obj.log.error('[%s:%d] %s', ME.stack(2).name, ME.stack(2).line, ME.message);
+                cStr = cat(1, sprintf('%s\n', ME.message), arrayfun(@(x) sprintf('  In %s (line %d)\n', x.name, x.line), ME.stack, 'UniformOutput', false));
+                str = [cStr{:}];
+                obj.log.error(str);
+                conn.send_text(cat(2, 'ERROR   ', str))
+                conn.send_close();
                 rethrow(ME);
             end
 

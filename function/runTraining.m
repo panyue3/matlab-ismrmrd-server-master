@@ -76,7 +76,7 @@ else
                 regressionLayer];
     end
 
-    parfor nSecs=1:5
+    parfor nSecs=1:2
         nBeats = sum((ptdata.time(param.pk)-ptdata.time(1))<nSecs);
         % Pack PT and Disp data into NN input and output arrays
         InData = cell(1,numRep-nBeats);
