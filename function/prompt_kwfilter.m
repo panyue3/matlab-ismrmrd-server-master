@@ -305,7 +305,7 @@ classdef prompt_kwfilter < handle
                 end
 
                 % ----------------------------------------------------------
-                % KW filtering
+                % KW filter
                 % ----------------------------------------------------------
                 if ~isempty(imgGroup)
                     logging.info("Processing a group of image for KW filtering")

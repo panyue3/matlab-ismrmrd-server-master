@@ -1,0 +1,27 @@
+function p = checkmoviek(i1,k0)
+k = 0 ; a = 0 ; b0 = 0; stepshift = 11.4;
+
+for i = 2510-round(stepshift*(i1-110)/100)*10:10:2750-round(stepshift*(i1-110)/10)
+for j = i1
+    k=k+1;a=0;b=0;
+    b1 = zeros(256,256);
+    fname = sprintf('%i_%imov',i,j);
+    fid=fopen(fname); a=0;
+    a=fread(fid,[160,120],'uchar');
+    fclose(fid);
+    b(1:64,1:64)=a(34:97,29:92)+1;
+    if k == 1,
+        b0 = lpfilter(b,0.1)+1; % figure(1) , imagesc(b0);
+    end
+    b = b./b0; % figure(1), imagesc(b./b0), colorbar
+    b=lpfilter(b,0.618);
+    b=hpfilter(b,0.0618);
+    b=b-mean(b(:));
+    b1(129-31:129+32,129-31:129+32) = b;
+    c = abs(fftshift(fft2(b1))) ; 
+    d = xy2rt(c,129,129,1:100,0:0.1:2*pi);
+    e = sum(d,1).*(1:100); %k = k ,figure(2), plot(e), pause(5)
+    p(k) = sum(e(k0-2:k0+2))/(median((c(:))));
+    
+end, end
+    plot(p,'o-')

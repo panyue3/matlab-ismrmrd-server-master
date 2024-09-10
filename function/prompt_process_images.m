@@ -14,8 +14,8 @@ logging.info('Training end expiratory amplitude: %.2f.', imdata.endExp)
 
 % Pack cropped reference images
 image{size(Ireg,3)*size(Ireg,4)} = ismrmrd.Image;
-for ii = 1:(metadata.encoding.encodingLimits.slice.maximum + 1)
-    for jj = 1:(metadata.encoding.encodingLimits.repetition.maximum + 1)
+for ii = 1:size(Ireg,4)
+    for jj = 1:size(Ireg,3)
         if imdata.isFlip(ii)
             ima = ismrmrd.Image(transpose(single(Ireg(:,:,jj,ii))));
         else

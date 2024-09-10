@@ -6,9 +6,7 @@ data = cat(3, cData{:});
 s_a = size(data);
 % Sorting Images
 logging.info('Sorting Images ...')
-for i=1:size(data,3)
-    v_0(i, :) = group{i}.head.position;
-end
+v_0 = cell2mat(cellfun(@(x) x.head.position, group, 'UniformOutput', false)');
 v_1 = v_0(1, :) - v_0(2, :);
 b(1) = 0;
 for i = 2:size(v_0, 1)
@@ -35,7 +33,6 @@ else
     option.step_x = 2;
     option.step_y = 2;
 end
-a_f = zeros(s_a);
 %             if (s_a(3) > 20) && (s_a(3) < 37)
 %                 disp('Separate odd/even ...')
 %                 a_f(:,:,1:2:end) = KW_Patch_Filter_Adam(double(data(:,:,1:2:end)), option);
@@ -50,13 +47,13 @@ else
 end
 % a_f = KW_Patch_Filter_Adam(double(data), option);
 % a_f = single(KW_Patch_Filter_Adam_Slide(double(data), option));
-a_f = single(KW_Patch_Filter_Adam_Slide_Neigh(double(data), option));
+data = single(KW_Patch_Filter_Adam_Slide_Neigh(double(data), option));
 %             end
 % Invert image contrast
 %data = int16(abs(32767-data));
 
 logging.info('Restore Order ...')
-data(:,:,J) = uint16(a_f);
+data(:,:,J) = uint16(data);
 
 % Re-slice back into 2D MRD images
 images = cell(1, size(data,3));
@@ -70,7 +67,6 @@ for iImg = 1:size(data,3)
     image.head.data_type = newHead.data_type;
     image.head.channels  = newHead.channels;
     %disp(['image.head.ProtocolName = ', image.head.ProtocolName])
-    group_image = group{iImg};
     % save(['Group_image_', datestr(now, 'yyyy_mm_dd_HH_MM_SS_FFF'), '.mat'], 'group_image')
     % Add to ImageProcessingHistory
     meta = ismrmrd.Meta.deserialize(group{iImg}.attribute_string);
@@ -83,11 +79,9 @@ for iImg = 1:size(data,3)
     %save(['Meta_Data_', datestr(now, 'yyyy_mm_dd_HH_MM_SS_FFF'), '.mat'], 'meta')
     images{iImg} = image;
 end
-for i=1:size(data,3)
-    v_re(i, :) = images{i}.head.position;
-end
+v_re = cell2mat(cellfun(@(x) x.head.position, images, 'UniformOutput', false)');
 
 logging.info('Save data with slice poition ...')
-save(fullfile(pwd,'output',['Temp_Data_0', datestr(now, 'yyyy_mm_dd_HH_MM_SS'), '.mat']), 'data_0', 'a_f', 'v_0', 'v_re', 'b', 'J', 'images', 'metadata', 'option')
+save(fullfile(pwd,'output',['Temp_Data_0', datestr(now, 'yyyy_mm_dd_HH_MM_SS'), '.mat']), 'data_0', 'data', 'v_0', 'v_re', 'b', 'J', 'images', 'metadata', 'option')
 
 end

@@ -1,0 +1,1 @@
+figure(1);for i=1:31,subplot(5,7,i); plot(p00(i,:)), axis tight ,end

@@ -16,7 +16,7 @@ validref = false;
 
 % Extract image data
 nOri = metadata.encoding.encodingLimits.slice.maximum +1;
-nRep = metadata.encoding.encodingLimits.repetition.maximum + 1;
+nRep = (metadata.encoding.encodingLimits.repetition.maximum + 1) * (metadata.encoding.encodingLimits.average.maximum + 1);
 szPix = single(group{1}.head.field_of_view(1:2)) ./ single(group{1}.head.matrix_size(1:2));
 isFlip = false(1,nOri);
 cData = cellfun(@(x) x.data, group, 'UniformOutput', false);
@@ -47,7 +47,7 @@ end
 imAll = nan([size(data,[1 2]), nRep, nOri]);
 Am_Ser = nan(size(imAll));
 for iOri = 1:nOri
-    imAll(:,:,:,iOri) = data(:,:,cell2mat(cellfun(@(x) x.head.slice, group, 'UniformOutput', false))==iOri-1);
+    imAll(:,:,:,iOri) = data(:,:,(cell2mat(cellfun(@(x) x.head.slice, group, 'UniformOutput', false))==iOri-1 & cell2mat(cellfun(@(x) x.head.set, group, 'UniformOutput', false))==0));
 end
 
 if nargin > 3   
@@ -244,10 +244,10 @@ for iOri = 1:nOri
     % === MOCO all images use end respiratory frame as reference ===
 
     % +++ Place ROI in registered images +++
-    Am_Ser(floor(rectSer(2)), floor(rectSer(1)):ceil(rectSer(1)+rectSer(3)), :, iOri) = intmax('uint16');
-    Am_Ser(ceil(rectSer(2)+rectSer(4)), floor(rectSer(1)):ceil(rectSer(1)+rectSer(3)), :, iOri)  = intmax('uint16');
-    Am_Ser(floor(rectSer(2)):ceil(rectSer(2)+rectSer(4)), floor(rectSer(1)), :, iOri) = intmax('uint16');
-    Am_Ser(floor(rectSer(2)):ceil(rectSer(2)+rectSer(4)), ceil(rectSer(1)+rectSer(3)), :, iOri) = intmax('uint16');
+    Am_Ser(round(rectSer(2)), round(rectSer(1)):round(rectSer(1)+rectSer(3)), :, iOri) = max(Am_Ser(:));
+    Am_Ser(round(rectSer(2)+rectSer(4)), round(rectSer(1)):round(rectSer(1)+rectSer(3)), :, iOri)  = max(Am_Ser(:));
+    Am_Ser(round(rectSer(2)):round(rectSer(2)+rectSer(4)), round(rectSer(1)), :, iOri) = max(Am_Ser(:));
+    Am_Ser(round(rectSer(2)):round(rectSer(2)+rectSer(4)), round(rectSer(1)+rectSer(3)), :, iOri) = max(Am_Ser(:));
     % === Place ROI in registered images ===
 
 end    % end of count Ori

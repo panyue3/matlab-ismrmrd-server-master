@@ -70,12 +70,13 @@ for i = 1:size(edges, 1)
     end
 end
 intersection_points = unique(intersection_points, 'rows'); % Remove duplicate intersection points
+intersection_points = intersection_points - plane_center;
 
 % Plot the intersection points
 if ~isempty(intersection_points)
 
     projected_points = [intersection_points * u_vector_rotated', intersection_points * v_vector_rotated'];
-    projected_points = double(flip(matrix_size/2)) + projected_points .* flip(matrix_size./plane_size) ;
+    projected_points = double(flip(matrix_size/2)) + projected_points .* flip(matrix_size./plane_size);
 
     % Compute the centroid of the projected points
     centroid = mean(projected_points);
