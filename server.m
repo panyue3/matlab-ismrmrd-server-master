@@ -60,7 +60,8 @@ classdef server < handle
                 try
                     metadata = ismrmrd.xml.deserialize(metadata);
                     if ~isempty(metadata.acquisitionSystemInformation.systemFieldStrength_T)
-                        obj.log.info("Data is from a %s %s at %1.1fT", metadata.acquisitionSystemInformation.systemVendor, metadata.acquisitionSystemInformation.systemModel, metadata.acquisitionSystemInformation.systemFieldStrength_T)
+                        tmp = split(metadata.measurementInformation.measurementID,'_');
+                        obj.log.info("MID%05i data is from a %s %s at %1.1fT", str2double(tmp{end}), metadata.acquisitionSystemInformation.systemVendor, metadata.acquisitionSystemInformation.systemModel, metadata.acquisitionSystemInformation.systemFieldStrength_T)
                     end
                 catch
                     obj.log.info("Metadata is not a valid MRD XML structure.  Passing on metadata as text")
@@ -70,14 +71,19 @@ classdef server < handle
                 % As a shortcut, we accept the file name as text too.
                 % ------------------------------------------------------- prompt ---------------------------------------------------------- %
                 if strcmpi(config, "prompt")
-                    obj.log.info("Starting prompt processing based on config")
                     if metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTcalibrate'))).value
+                        obj.log.info("Starting prompt_calibrate processing based on config")
                         recon = prompt_calibrate;
+%                         recon = prompt;
                     else
                         if logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'KWfilter'))).value)
-                            recon = prompt_kwfilter;
+                            obj.log.info("Starting prompt_mstar processing based on config")
+                            % recon = prompt_kwfilter;
+                            recon = prompt_mstar;
                         elseif ispc || logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value)
-                            recon = prompt_rtfb;
+                            obj.log.info("Starting prompt_rtfb processing based on config")
+                            %recon = prompt_rtfb;
+                            recon = getpmu;
                         else % Dummy loop with no processing
                             try
                                 while true
@@ -90,8 +96,6 @@ classdef server < handle
                             catch
                                 conn.send_close();
                             end
-                            % Dummy function for below as we already processed the data
-                            recon = @(conn, config, meta, log) (true);
                         end
                     end
                 % --------------------------------------------------- prompt_map ------------------------------------------------------- %
@@ -121,8 +125,6 @@ classdef server < handle
                     catch
                         conn.send_close();
                     end
-                    % Dummy function for below as we already processed the data
-                    recon = @(conn, config, meta, log) (true);
                 else
                     if exist(config, 'class')
                         obj.log.info("Starting %s processing based on config", config)
@@ -132,7 +134,10 @@ classdef server < handle
                         recon = invertcontrast;
                     end
                 end
-                recon.process(conn, config, metadata, obj.log);
+
+                if exist('recon','var')
+                    recon.process(conn, config, metadata, obj.log);
+                end
 
             catch ME
                 cStr = cat(1, sprintf('%s\n', ME.message), arrayfun(@(x) sprintf('  In %s (line %d)\n', x.name, x.line), ME.stack, 'UniformOutput', false));

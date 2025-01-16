@@ -33,6 +33,12 @@ classdef prompt_kwfilter < handle
             sendRTFB = logical(metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'PTRTFB'))).value);
             runMOCO = metadata.userParameters.userParameterLong(find(strcmp({metadata.userParameters.userParameterLong.name}, 'MOCO'))).value;
 
+            if sendRTFB
+                % Send feedback once to open the connection
+                feedbackData = PTshiftFBData(zeros(1,3), true, logging);
+                connection.send_feedback('PTShift', feedbackData);
+            end
+
             % Load training result. If multiple training was done, read in the last file generated
             tmp = [split(metadata.measurementInformation.frameOfReferenceUID,'.'); split(metadata.measurementInformation.measurementID,'_')];
             filename = sprintf("train_%s.*.mat", tmp{11});
@@ -68,9 +74,10 @@ classdef prompt_kwfilter < handle
             % Init variables
             gateWindow = metadata.userParameters.userParameterDouble(find(strcmp({metadata.userParameters.userParameterDouble.name}, 'PTgateWindow'))).value;
             if ~gateWindow
-                gateWindow = param.defaultWin;
-                logging.info("Gating window is not set, usiong default %0.1f mm.", gateWindow)
+                gateWindow = param.defaultWin*1.5; % +-75% respiration range in training dataset
+                logging.info("Gating window is not set, using default %0.1f mm.", gateWindow)
             end
+            logging.info("Accepting images between [%0.1f, %0.1f]mm.", param.endExp-gateWindow/2, param.endExp+gateWindow/2)
             nTrigs = (metadata.encoding.encodingLimits.average.maximum+1)*(metadata.encoding.encodingLimits.repetition.maximum+1);
             nImg = (metadata.encoding.encodingLimits.slice.maximum+1) * nTrigs; % NEED TO MODIFY IF SLICES ARE NOT CONCATED
             ntClip = 11;
@@ -79,6 +86,12 @@ classdef prompt_kwfilter < handle
             if sendRTFB
                 ptGroup = cell(1,ntClip*200*(sysFreeMax+1)); % ismrmrd.Waveform;
                 ecgGroup = cell(1,ntClip*10); % ismrmrd.Waveform;
+
+                % Init prompt_run_predict to avoid delay in first prediction
+                tic
+                prompt_run_predict([], [], net, param, metadata, logging);
+                elapsedTime = toc;
+                logging.debug("Initiate prediction. -- Time used: %.3f.", elapsedTime)
             else
                 ptGroup = cell(1,round(1.2*nTrigs*200*(sysFreeMax+1))); % ismrmrd.Waveform;
                 ecgGroup = cell(1,round(1.2*nTrigs*10)); % ismrmrd.Waveform;
@@ -196,6 +209,11 @@ classdef prompt_kwfilter < handle
                                     %feedbackData = PTshiftFBData([0 0 shiftvector(3)], isSkipAcq, logging);
                                     logging.debug("Predicted shift dX: %.6f, dY: %.6f, dZ: %.6f. Skip: %i. -- Time used: %.3f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), isSkipAcq, elapsedTime)
 
+                                    if sendRTFB
+                                        % Send shift vector through Feedback
+                                        connection.send_feedback('PTShift', feedbackData);
+                                    end
+
                                 else % PT samples not sufficient for prediction
                                     gateRange = [param.endExp-gateWindow/2, param.endExp+gateWindow/2];
                                     predshift(end+1,:) = nan(1,3);
@@ -203,11 +221,6 @@ classdef prompt_kwfilter < handle
                                     feedbackData = PTshiftFBData(zeros(1,3), true, logging);
                                     logging.debug("Collecting PT data, dX: NaN, dY: NaN, dZ: NaN. Skip: true.")
 
-                                end
-
-                                if sendRTFB
-                                    % Send shift vector through Feedback
-                                    connection.send_feedback('PTShift', feedbackData);
                                 end
                                 
                             end     % ecg trigger occured

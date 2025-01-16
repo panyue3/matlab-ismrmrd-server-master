@@ -61,18 +61,17 @@ if runTraining
     nReps = metadata.encoding.encodingLimits.repetition.maximum+1;
     if nReps ~= sum(ecgdata.trigger)
         logging.debug('Trigger number and images received did not match, # reps: %i, # trigs: %i', nReps, sum(ecgdata.trigger))
-        tr = (metadata.encoding.encodingLimits.slice.maximum+1) * (metadata.sequenceParameters.TR) / 1000;
         tdelay_setting = metadata.userParameters.userParameterDouble(find(strcmp({metadata.userParameters.userParameterDouble.name}, 'ECGTriggerDelay_ms'))).value/1000;
         t_fst_rf = ptdata.rawtime(~ptdata.isvalid);
-        t_fst_rf = [t_fst_rf(diff([0; t_fst_rf]) > tr)];
+        t_fst_rf = [t_fst_rf(diff([0; t_fst_rf]) > 0.01)];
 
         if nReps < sum(ecgdata.trigger) % extra trigger
             t_trigs = ecgdata.time(ecgdata.trigger);
             time_mx = t_fst_rf - t_trigs.';
             time_mx(time_mx<0) = nan;
-            t_delay= round(min(time_mx, [], 1,'omitnan'), 2);
-            logging.debug('Deleting %i trigger.', sum(t_delay - tdelay_setting > 0.025))
-            ecgdata.trigger(ismember(ecgdata.time, t_trigs(t_delay - tdelay_setting > 0.025))) = false;
+            t_delay = round(min(time_mx, [], 1,'omitnan'), 2);
+            logging.debug('Deleting %i trigger.', sum(t_delay - tdelay_setting > 0.025 | t_delay - tdelay_setting < -0.025))
+            ecgdata.trigger(ismember(ecgdata.time, t_trigs(t_delay - tdelay_setting > 0.025 | t_delay - tdelay_setting < -0.025))) = false;
         end
 
         if nReps > sum(ecgdata.trigger) % missing trigger

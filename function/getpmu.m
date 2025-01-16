@@ -92,9 +92,27 @@ classdef getpmu < handle
         function image = process_waveform(obj, group, metadata, logging)
             global info
             sysFreeMax = contains(metadata.acquisitionSystemInformation.systemModel,'Free.Max','IgnoreCase',true);
+            wavid = cell2mat(cellfun(@(x) x.head.waveform_id, group, 'UniformOutput', false)');
+
+            if any(wavid == 16)
+                ptGroup = group(wavid==16);
+                ncha = cellfun(@(x) x.head.channels, ptGroup);
+
+                if ~sysFreeMax
+                    ptdata.rawdata = cell2mat(cellfun(@(x) x.data(:,1:end-1), ptGroup(ncha == mode(ncha)), 'UniformOutput', false)');
+                    ptdata.isvalid = logical(cell2mat(cellfun(@(x) x.data(1:2:end,end), ptGroup(ncha == mode(ncha)), 'UniformOutput', false)'));
+                else
+                    ptdata.rawdata = cell2mat(cellfun(@(x) x.data(1:10,1:end-1), ptGroup(ncha == mode(ncha)), 'UniformOutput', false)');
+                    ptdata.isvalid = logical(cell2mat(cellfun(@(x) x.data(1:2:10,end), ptGroup(ncha == mode(ncha)), 'UniformOutput', false)'));
+                end
+                ptdata.rawdata = reshape(typecast(ptdata.rawdata(:),'single'),[],mode(ncha)-1);
+                ptdata.rawdata = ptdata.rawdata(1:2:end,:) + ptdata.rawdata(2:2:end,:)*1i;
+                ptdata.rawtime = (0:numel(ptdata.isvalid)-1)'*500*10^-6;
+            else
+                fprintf('No PT data found')
+            end
 
             % Extract ecg data
-            wavid = cell2mat(cellfun(@(x) x.head.waveform_id, group, 'UniformOutput', false)');
             if sysFreeMax
                 ecgGroup = group(wavid==3);
                 ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,2)==2048, ecgGroup, 'UniformOutput', false)');
@@ -103,19 +121,29 @@ classdef getpmu < handle
                 ecgdata.trigger = cell2mat(cellfun(@(x) x.data(:,5)==16384, ecgGroup, 'UniformOutput', false)');
             end
             ecgdata.data = cell2mat(cellfun(@(x) x.data, ecgGroup, 'UniformOutput', false)');
-            ecgdata.time =  double((ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+uint32(ecgGroup{end}.head.number_of_samples)-1)  - ecgGroup{1}.head.time_stamp)'*2.5*10^-3;
-            [~, pk] = findpeaks(double(ecgdata.trigger));
-            ecgdata.trigtime = ecgdata.time(pk);
+            ecgdata.nSamples = sum(cell2mat(cellfun(@(x) x.head.number_of_samples, ecgGroup, 'UniformOutput', false)'));
+            if any(wavid == 16)
+                ecgdata.time =  double(uint32 (1:ecgdata.nSamples) + ecgGroup{1}.head.time_stamp - ptGroup{find(ncha == mode(ncha),1)}.head.time_stamp)'*2.5*10^-3;
+            else
+                ecgdata.time =  double((ecgGroup{1}.head.time_stamp:ecgGroup{end}.head.time_stamp+uint32(ecgGroup{end}.head.number_of_samples)-1)  - ecgGroup{1}.head.time_stamp)'*2.5*10^-3;
+            end
+            ecgdata.trigger(ecgdata.time==0) = [];
+            ecgdata.time(ecgdata.time==0) = [];
+            ecgdata.nSamples = numel(ecgdata.trigger);
+            ecgdata.medianRR =  median(diff(ecgdata.time(ecgdata.trigger)));
 
             % Save figure to output folder
             fig = figure;
-            plot(ecgdata.time,ecgdata.data(:,1))
-            set(gcf,'Position', [0 0 1200 900])
-            if any(wavid == 16)
-                title(sprintf('PT data exist, total number %i',sum(wavid==16)))
-            else
-                title('No PT data found')
-            end
+            plot(ptdata.rawtime,real(ptdata.rawdata(:,1)))
+            xline(ecgdata.time(ecgdata.trigger))
+            text(ecgdata.time(ecgdata.trigger),min(real(ptdata.rawdata(:,1)))*ones(sum(ecgdata.trigger),1),string(1:sum(ecgdata.trigger)))
+%             plot(ecgdata.time,ecgdata.data(:,1))
+%             set(gcf,'Position', [0 0 1200 900])
+%             if any(wavid == 16)
+%                 title(sprintf('PT data exist, total number %i',sum(wavid==16)))
+%             else
+%                 title('No PT data found')
+%             end
 
             if ispc
                 figname = fullfile(pwd,'output','ECG.png');

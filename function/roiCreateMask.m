@@ -95,6 +95,8 @@ end
 figure
 imagesc(imagedata.data)
 h = drawpolygon('Position', projected_points);
+% h = drawrectangle;
+wait(h)
 roiMask = createMask(h);
 % pause(3)
 close

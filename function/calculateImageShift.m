@@ -79,9 +79,25 @@ for iOri = 1:nOri
     % === Find image orientation ===
 
     % +++ Define ROI mask +++
-    roimask = roiCreateMask(group{iOri}, metadata);
-    stats = regionprops(roimask, 'BoundingBox');
-    rectSer = stats.BoundingBox;
+    if nargin > 3 && all(isFlip == ref.isFlip)
+        rectSer = ref.roi{iOri}.rectSer;
+        roimask = ref.roi{iOri}.mask;
+    else
+        roimask = roiCreateMask(group{iOri}, metadata);
+        if isFlip(iOri)
+            roimask = transpose(roimask);
+        end
+        stats = regionprops(roimask, 'BoundingBox');
+        rectSer = stats.BoundingBox;
+        if rectSer(1) + rectSer(3) > size(imAll,2) || rectSer(2) + rectSer(4) > size(imAll,1)
+            rectSer = [round(size(imAll,2)*(1/2-1/2/cropfactor)), round(size(imAll,1)*(1/2-1/2/cropfactor)), round(size(imAll,2)/cropfactor), round(size(imAll,1)/cropfactor)];
+            figure
+            imagesc(roimask)
+            h = drawrectangle('Position',rectSer);
+            roimask = createMask(h);
+            close
+        end
+    end
     % === Define ROI mask ===
 
     % +++ Find end respiratory frame by MOCO first 10 frame +++
@@ -114,10 +130,13 @@ for iOri = 1:nOri
                         parfor ii = 1:11
                             BSer_interp(:,:,ii) = interp2(x, y, BSer(:,:,ii+1), xq, yq,'spline');
                         end
-                        roimask_interp = interp2(x, y, roimask, xq, yq,'nearest');
-                        stats = regionprops(roimask_interp, 'BoundingBox');
-                        rectSer_interp = stats.BoundingBox;
-%                         rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/cropfactor));
+                        if rectSer(1) + rectSer(3) > size(imAll,2) || rectSer(2) + rectSer(4) > size(imAll,1)
+                            roimask_interp = interp2(x, y, roimask, xq, yq,'nearest');
+                            stats = regionprops(roimask_interp, 'BoundingBox');
+                            rectSer_interp = stats.BoundingBox;
+                        else
+                            rectSer_interp = [round(size(BSer_interp,2)*(1/2-1/2/cropfactor)), round(size(BSer_interp,1)*(1/2-1/2/cropfactor)), round(size(BSer_interp,2)/cropfactor), round(size(BSer_interp,1)/cropfactor)];
+                        end
                         Iref_interp = imcrop(BSer_interp(:,:,5),rectSer_interp);
                         xoffset = (size(BSer_interp,2) + size(Iref_interp,2) + 1)/2;
                         parfor ii = 1:11
@@ -151,10 +170,13 @@ for iOri = 1:nOri
                         parfor ii = 1:11
                             BSer_interp(:,:,ii) = interp2(x, y, BSer(:,:,ii+1), xq, yq,'spline');
                         end
-                        roimask_interp = interp2(x, y, roimask, xq, yq,'nearest');
-                        stats = regionprops(roimask_interp, 'BoundingBox');
-                        rectSer_interp = stats.BoundingBox;
-%                         rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/cropfactor));
+                        if rectSer(1) + rectSer(3) > size(imAll,2) || rectSer(2) + rectSer(4) > size(imAll,1)
+                            roimask_interp = interp2(x, y, roimask, xq, yq,'nearest');
+                            stats = regionprops(roimask_interp, 'BoundingBox');
+                            rectSer_interp = stats.BoundingBox;
+                        else
+                            rectSer_interp = [round(size(BSer_interp,2)*(1/2-1/2/cropfactor)), round(size(BSer_interp,1)*(1/2-1/2/cropfactor)), round(size(BSer_interp,2)/cropfactor), round(size(BSer_interp,1)/cropfactor)];
+                        end
                         Iref_interp = imcrop(BSer_interp(:,:,5),rectSer_interp);
                         xoffset = (size(BSer_interp,1) + size(Iref_interp,1) + 1)/2;
                         parfor ii = 1:11
@@ -225,7 +247,13 @@ for iOri = 1:nOri
             parfor iRep = 1:size(BSer,3)
                 BSer_interp(:,:,iRep) = interp2(x, y, BSer(:,:,iRep), xq, yq,'spline');
             end
-            rectSer_interp = centerCropWindow2d(size(BSer_interp,[1 2]),round(size(BSer_interp,[1 2])/cropfactor));
+            if rectSer(1) + rectSer(3) > size(imAll,2) || rectSer(2) + rectSer(4) > size(imAll,1)
+                roimask_interp = interp2(x, y, roimask, xq, yq,'nearest');
+                stats = regionprops(roimask_interp, 'BoundingBox');
+                rectSer_interp = stats.BoundingBox;
+            else
+                rectSer_interp = [round(size(BSer_interp,2)*(1/2-1/2/cropfactor)), round(size(BSer_interp,1)*(1/2-1/2/cropfactor)), round(size(BSer_interp,2)/cropfactor), round(size(BSer_interp,1)/cropfactor)];
+            end
             Iref_interp = imcrop(BSer_interp(:,:,idx),rectSer_interp);
             yoffset = (size(BSer_interp,1) + size(Iref_interp,1) + 1)/2;
             xoffset = (size(BSer_interp,2) + size(Iref_interp,2) + 1)/2;
@@ -250,6 +278,8 @@ for iOri = 1:nOri
     Am_Ser(round(rectSer(2)):round(rectSer(2)+rectSer(4)), round(rectSer(1)+rectSer(3)), :, iOri) = max(Am_Ser(:));
     % === Place ROI in registered images ===
 
+    roi{iOri}.rectSer = rectSer;
+    roi{iOri}.mask = roimask;
 end    % end of count Ori
 
 if ispc
@@ -303,5 +333,8 @@ end
 imdata.shiftvec = imshift;
 imdata.isFlip = isFlip;
 imdata.refIma = refIma;
+imdata.roi = roi;
+imdata.group = group(1:nOri);
+imdata.imAll = imAll;
 
 end

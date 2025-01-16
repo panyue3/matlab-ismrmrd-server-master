@@ -58,7 +58,7 @@ classdef prompt_rtfb < handle
                     isPhantom = imdata.respRange < 1;
                     clear imdata
                 else
-                    ref.refIma = imdata.refIma; ref.isFlip = imdata.isFlip;
+                    ref.refIma = imdata.refIma; ref.isFlip = imdata.isFlip; ref.roi = imdata.roi;
                     clear imdata
                 end
 
@@ -79,8 +79,9 @@ classdef prompt_rtfb < handle
                 else
                     gateWindow = param.defaultWin*1.5; % +-75% respiration range in training dataset
                 end
-                logging.info("Gating window is not set, usiong default %0.1f mm.", gateWindow)
+                logging.info("Gating window is not set, using default %0.1f mm.", gateWindow)
             end
+            logging.info("Accepting images between [%0.1f, %0.1f]mm.", param.endExp-gateWindow/2, param.endExp+gateWindow/2)
             nTrigs = (metadata.encoding.encodingLimits.average.maximum+1)*(metadata.encoding.encodingLimits.repetition.maximum+1)*(metadata.encoding.encodingLimits.set.maximum+1);
             nImg = (metadata.encoding.encodingLimits.slice.maximum+1) * nTrigs; % NEED TO MODIFY IF SLICES ARE NOT CONCATED
             ntClip = 11;
@@ -218,6 +219,7 @@ classdef prompt_rtfb < handle
 
                                     isSkipAcq = logical(shiftvector(3) > gateRange(2) || shiftvector(3) < gateRange(1));
                                     predskip(end+1,:) = [double(isSkipAcq), gateRange];
+                                    shiftvector(3) = shiftvector(3) - param.endExp;
                                     feedbackData = PTshiftFBData(shiftvector, isSkipAcq, logging);
                                     logging.debug("Predicted shift dX: %.6f, dY: %.6f, dZ: %.6f. Skip: %i. -- Time used: %.3f.", feedbackData.shiftVec(1), feedbackData.shiftVec(2), feedbackData.shiftVec(3), isSkipAcq, elapsedTime)
 

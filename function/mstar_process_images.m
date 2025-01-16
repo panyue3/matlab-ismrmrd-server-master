@@ -24,13 +24,13 @@ logging.info('Filtering Images, I run ...')
 
 data = single(KW_Patch_Filter_Adam_Slide_Neigh(single(data)));
 
-logging.info('Restore Order ...')
-data(:,:,J) = uint16(data);
-
 % Slice to volume registration:
 Win_SL = 4;
 option.Window = Win_SL;
 data = LGE_MSTAR(data, [], option); 
+
+logging.info('Restore Order ...')
+data(:,:,J) = uint16(data);
 
 % Re-slice back into 2D MRD images
 images = cell(1, size(data,3));
@@ -40,12 +40,12 @@ for iImg = 1:size(data,3)
 
     % Copy original image header, but keep the new data_type and channels
     newHead = image.head;
-    image.head = group{J(iImg)}.head;
+    image.head = group{iImg}.head;
     image.head.data_type = newHead.data_type;
     image.head.channels  = newHead.channels;
 
     % Add to ImageProcessingHistory
-    meta = ismrmrd.Meta.deserialize(group{J(iImg)}.attribute_string);
+    meta = ismrmrd.Meta.deserialize(group{iImg}.attribute_string);
     meta = ismrmrd.Meta.appendValue(meta, 'ImageProcessingHistory', 'MSTAR Registration');
     temp_SequenceDescription = meta.SequenceDescription;
     meta.SequenceDescription = [temp_SequenceDescription, '_MSTAR'];

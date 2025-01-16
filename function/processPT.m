@@ -36,14 +36,14 @@ validTime(~valid) = [];
 
 respData = interp1(validTime, respData,time,'pchip');
 
+% remove dc and drift
 if runTraining
-    % remove dc and drift
     [~, param.dedriftVec] = remove_drift(respData(Data.driftStart:end,:));
 end
 respData = respData*param.dedriftVec;
-    
+
+% ROvir
 if runTraining
-    % ROVir
     fROI = [0.1 0.8];
     fInt = [1 Inf];
 
@@ -65,8 +65,9 @@ if runTraining
     [~, vIdx] = sort(diag(D),'descend');
     param.V = V(:,vIdx(1:param.numVCha));
 end
-
 respData = respData*param.V;
+
+% filter and downsample
 respData = medfilt1(cat(2,real(respData),imag(respData)), param.dsRate, [], 1);
 respTime = downsample(time,param.dsRate);
 if runTraining

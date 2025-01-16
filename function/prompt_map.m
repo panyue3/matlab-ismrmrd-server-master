@@ -80,6 +80,7 @@ classdef prompt_map < handle
                 end
                 logging.info("Gating window is not set, usiong default %0.1f mm.", gateWindow)
             end
+            logging.info("Accepting images between [%0.1f, %0.1f]mm.", param.endExp-gateWindow/2, param.endExp+gateWindow/2)
             nTrigs = (metadata.encoding.encodingLimits.average.maximum+1)*(metadata.encoding.encodingLimits.repetition.maximum+1)*(metadata.encoding.encodingLimits.set.maximum+1);
             ntClip = 11;
             predshift = []; 

@@ -20,7 +20,7 @@ if ispc
 elseif isunix
     filename = fullfile('/tmp/share/prompt',filename);
 end
-save(filename,'imdata', 'ptdata','net', 'param', 'info');
+save(filename,'imdata', 'ptdata','net', 'param', 'info','metadata');
 
 % Save figure to output folder
 fig = figure;
